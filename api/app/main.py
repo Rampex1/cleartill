@@ -9,11 +9,13 @@ from sqlalchemy.orm import Session
 
 from app import errors
 from app.db import get_db
+from app.routers import customers
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 app = FastAPI(title="Cleartill")
 errors.install(app)
+app.include_router(customers.router)
 
 
 @app.get("/healthz")

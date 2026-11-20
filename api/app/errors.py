@@ -6,7 +6,6 @@ import traceback
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
 from sqlalchemy.exc import DBAPIError, OperationalError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -206,10 +205,6 @@ def install(app: FastAPI) -> None:
         return error_response(
             exc.status, exc.type, exc.message, exc.code, exc.param, headers=exc.headers
         )
-
-    @app.exception_handler(ValidationError)
-    async def _pydantic_error(request: Request, exc: ValidationError):
-        return _validation_response(exc.errors())
 
     @app.exception_handler(RequestValidationError)
     async def _request_validation_error(request: Request, exc: RequestValidationError):
