@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app import errors
 from app.db import get_db
-from app.routers import customers, dashboard
+from app.routers import balance, customers, dashboard
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -17,6 +17,7 @@ app = FastAPI(title="Cleartill")
 errors.install(app)
 app.include_router(customers.router)
 app.include_router(dashboard.router)
+app.include_router(balance.router)
 
 
 @app.get("/healthz")

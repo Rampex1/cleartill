@@ -10,6 +10,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Text,
+    UniqueConstraint,
     false,
     text,
 )
@@ -81,3 +82,70 @@ class DashboardSession(Base):
     merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"), index=True)
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class LedgerAccount(Base):
+    __tablename__ = "ledger_accounts"
+    __table_args__ = (
+        UniqueConstraint("merchant_id", "kind", "currency", name="uq_ledger_accounts_merchant"),
+        # NULLs are distinct in a plain UNIQUE, so platform accounts need their own index.
+        Index(
+            "ux_ledger_accounts_platform",
+            "kind",
+            "currency",
+            unique=True,
+            postgresql_where=text("merchant_id IS NULL"),
+        ),
+        CheckConstraint(
+            "kind IN ('merchant_pending', 'merchant_available', "
+            "'card_network_clearing', 'platform_fees')",
+            name="ledger_accounts_kind",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    merchant_id: Mapped[str | None] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(Text)
+    currency: Mapped[str] = mapped_column(Text)
+
+
+class JournalTransaction(Base):
+    __tablename__ = "journal_transactions"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    type: Mapped[str] = mapped_column(Text)
+    source_id: Mapped[str] = mapped_column(Text)
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+
+
+class JournalEntry(Base):
+    __tablename__ = "journal_entries"
+    __table_args__ = (CheckConstraint("amount <> 0", name="journal_entries_nonzero"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    transaction_id: Mapped[str] = mapped_column(ForeignKey("journal_transactions.id"), index=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("ledger_accounts.id"), index=True)
+    amount: Mapped[int] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(Text)
+
+
+class BalanceTransaction(Base):
+    __tablename__ = "balance_transactions"
+    __table_args__ = (Index("ix_balance_transactions_merchant_seq", "merchant_id", "seq"),)
+    object_name = "balance transaction"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
+    type: Mapped[str] = mapped_column(Text)
+    amount: Mapped[int] = mapped_column(BigInteger)
+    fee: Mapped[int] = mapped_column(BigInteger)
+    net: Mapped[int] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    available_on: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source_id: Mapped[str] = mapped_column(Text)
+    journal_transaction_id: Mapped[str | None] = mapped_column(
+        ForeignKey("journal_transactions.id")
+    )
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
