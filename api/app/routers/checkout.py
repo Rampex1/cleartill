@@ -67,7 +67,7 @@ def three_ds(pi_id: str, request: Request, db: Db, params: Params):
         ):
             raise _not_found()
         if pi.checkout_session_id is not None:  # lock order (§5.2): session before PI
-            checkout.lock_session(db, pi.checkout_session_id)
+            checkout.require_open(checkout.lock_session(db, pi.checkout_session_id))
         pi = db.scalar(
             select(PaymentIntent)
             .where(PaymentIntent.id == pi_id)
@@ -133,20 +133,15 @@ def view_session(cs_id: str, db: Db):
 @router.post("/sessions/{cs_id}/pay")
 def pay_session(cs_id: str, request: Request, db: Db, params: Params):
     """Card data lives only in memory here: never hashed, stored, logged or echoed.
-    ponytail: no per-IP rate limit (simulated network, nothing to card-test)."""
+    Failed attempts per session are capped (checkout.MAX_FAILED_ATTEMPTS)."""
 
     def handler():
         data = forms.validate(PayParams, params)
         cs = checkout.lock_session(db, cs_id)
         if cs is None:
             raise _session_not_found()
-        if not checkout.is_open(cs):
-            raise ApiError(
-                400,
-                "invalid_request_error",
-                "This checkout session is no longer accepting payments.",
-                code="checkout_session_unexpected_state",
-            )
+        checkout.require_open(cs)
+        checkout.require_attempts_left(db, cs)
         pi = db.scalar(
             select(PaymentIntent)
             .where(PaymentIntent.id == cs.payment_intent_id)

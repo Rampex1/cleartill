@@ -1,18 +1,24 @@
 """Hosted checkout sessions (design §5.10). Lock order (§5.2): session, then PI, then charge."""
 
+import logging
 from datetime import timedelta
 
 from fastapi import Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import clock, config
+from app.errors import ApiError
 from app.events import emit
-from app.models import CheckoutSession, PaymentIntent
+from app.models import Charge, CheckoutSession, PaymentIntent
 from app.payment_intents import pi_json
+
+log = logging.getLogger("cleartill.checkout")
 
 SESSION_LIFETIME = timedelta(hours=24)
 EXPIRY_BATCH = 100
+# Bounds what a looped decline on one session URL can write (PMs, charges, events, webhooks).
+MAX_FAILED_ATTEMPTS = 20
 CANCELABLE = {"requires_payment_method", "requires_confirmation", "requires_action"}
 
 
@@ -53,7 +59,7 @@ def public_json(db: Session, cs: CheckoutSession) -> dict:
         "amount_total": cs.amount_total,
         "currency": cs.currency,
         "line_items": cs.line_items,
-        "success_url": cs.success_url,
+        "success_url": success_redirect(cs),
         "cancel_url": cs.cancel_url,
         "last_payment_error": {"message": error["message"]} if error else None,
     }
@@ -66,6 +72,31 @@ def lock_session(db: Session, cs_id: str) -> CheckoutSession | None:
         .with_for_update()
         .execution_options(populate_existing=True)
     )
+
+
+def require_open(cs: CheckoutSession) -> None:
+    if not is_open(cs):
+        raise ApiError(
+            400,
+            "invalid_request_error",
+            "This checkout session is no longer accepting payments.",
+            code="checkout_session_unexpected_state",
+        )
+
+
+def require_attempts_left(db: Session, cs: CheckoutSession) -> None:
+    failed = db.scalar(
+        select(func.count())
+        .select_from(Charge)
+        .where(Charge.payment_intent_id == cs.payment_intent_id, Charge.status == "failed")
+    )
+    if failed >= MAX_FAILED_ATTEMPTS:
+        raise ApiError(
+            400,
+            "invalid_request_error",
+            "Too many failed payment attempts for this checkout session.",
+            code="checkout_session_unexpected_state",
+        )
 
 
 def success_redirect(cs: CheckoutSession) -> str:
@@ -95,22 +126,30 @@ def expire_sessions(db: Session) -> int:
     ).all()
     expired = 0
     for cs in due:
-        if cs.status != "open":
-            continue
-        pi = db.scalar(
-            select(PaymentIntent)
-            .where(PaymentIntent.id == cs.payment_intent_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-        cs.status = "expired"
-        db.flush()
-        emit(db, cs.merchant_id, "checkout.session.expired", session_json(cs))
-        if pi.status in CANCELABLE:
-            pi.status = "canceled"
-            pi.cancellation_reason = "abandoned"
-            pi.next_action = None
-            db.flush()
-            emit(db, pi.merchant_id, "payment_intent.canceled", pi_json(pi))
-        expired += 1
+        try:
+            with db.begin_nested():  # one bad row is logged and skipped, not the whole batch
+                expired += _expire(db, cs)
+        except Exception:
+            log.exception("could not expire checkout session %s", cs.id)
     return expired
+
+
+def _expire(db: Session, cs: CheckoutSession) -> int:
+    pi = db.scalar(
+        select(PaymentIntent)
+        .where(PaymentIntent.id == cs.payment_intent_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if pi.status not in CANCELABLE:  # completion is atomic with success, so this is a bug
+        log.error("open session %s has PI in %s; not expiring", cs.id, pi.status)
+        return 0
+    cs.status = "expired"
+    db.flush()
+    emit(db, cs.merchant_id, "checkout.session.expired", session_json(cs))
+    pi.status = "canceled"
+    pi.cancellation_reason = "abandoned"
+    pi.next_action = None
+    db.flush()
+    emit(db, pi.merchant_id, "payment_intent.canceled", pi_json(pi))
+    return 1
