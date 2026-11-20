@@ -9,7 +9,14 @@ from sqlalchemy.orm import Session
 
 from app import config, errors
 from app.db import get_db
-from app.routers import balance, customers, dashboard, events, payment_methods
+from app.routers import (
+    balance,
+    customers,
+    dashboard,
+    events,
+    payment_intents,
+    payment_methods,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 config.secret_key()  # refuse to start without a strong SECRET_KEY
@@ -21,6 +28,7 @@ app.include_router(dashboard.router)
 app.include_router(balance.router)
 app.include_router(events.router)
 app.include_router(payment_methods.router)
+app.include_router(payment_intents.router)
 
 
 @app.get("/healthz")
