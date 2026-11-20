@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import forms
+from app import expand, forms
 from app.auth import AuthContext, require_secret_key
 from app.db import get_db
 from app.events import emit
@@ -76,6 +76,7 @@ class CaptureParams(BaseModel):
 
 class ListParams(forms.ListParams):
     customer: str | None = None
+    expand: forms.FormList[str] = []
 
 
 def _customer_id(db: Session, merchant_id: str, value: str | None) -> str | None:
@@ -126,15 +127,18 @@ def list_payment_intents(auth: Auth, db: Db, params: Params):
     stmt = select(PaymentIntent)
     if lp.customer:
         stmt = stmt.where(PaymentIntent.customer_id == lp.customer)
+    paths = expand.parse(lp.expand, expand.PAYMENT_INTENT_PATHS, on_list=True)
     page = paginate(db, stmt, PaymentIntent, auth.merchant.id, lp, "/v1/payment_intents")
-    page["data"] = [pi_json(pi) for pi in page["data"]]
+    page["data"] = [expand.expand_payment_intent(db, pi, pi_json(pi), paths) for pi in page["data"]]
     return page
 
 
 @router.get("/{pi_id}")
 def retrieve_payment_intent(pi_id: str, auth: Auth, db: Db, params: Params):
-    forms.validate(forms.NoParams, params)  # M12 adds expand[]
-    return pi_json(get_owned(db, PaymentIntent, pi_id, auth.merchant.id))
+    data = forms.validate(forms.ExpandParams, params)
+    paths = expand.parse(data.expand, expand.PAYMENT_INTENT_PATHS, on_list=False)
+    pi = get_owned(db, PaymentIntent, pi_id, auth.merchant.id)
+    return expand.expand_payment_intent(db, pi, pi_json(pi), paths)
 
 
 @router.post("/{pi_id}")
