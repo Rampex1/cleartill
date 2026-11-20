@@ -2,13 +2,10 @@
 last4, expiry, a keyed fingerprint and the simulated outcome. Error messages never contain
 any part of the number."""
 
-import hashlib
-import hmac
-import os
 import re
 from dataclasses import dataclass
 
-from app import clock
+from app import clock, config
 from app.errors import ApiError
 
 SIM_OUTCOMES = {
@@ -20,7 +17,6 @@ SIM_OUTCOMES = {
     "4000000000000119": "processing_error",
     "4000002760003184": "requires_3ds",
 }
-OUTCOMES = ("success", *sorted(set(SIM_OUTCOMES.values()) - {"success"}))
 MAX_YEARS_AHEAD = 50
 
 
@@ -65,19 +61,17 @@ def sim_outcome_for(number: str) -> str:
 
 
 def fingerprint(number: str) -> str:
-    secret = os.environ.get("SECRET_KEY")
-    if not secret:
-        raise RuntimeError("SECRET_KEY must be set")
-    return hmac.new(secret.encode(), number.encode(), hashlib.sha256).hexdigest()[:32]
+    return config.keyed_hash("card-fingerprint", number)[:32]
 
 
 def _parse_int(value: str) -> int | None:
-    return int(value) if re.fullmatch(r"\d{1,4}", value or "") else None
+    # [0-9], not \d: Unicode digits (fullwidth, Arabic-Indic) must not count as card digits.
+    return int(value) if re.fullmatch(r"[0-9]{1,4}", value or "") else None
 
 
 def tokenize(number: str, exp_month: str, exp_year: str, cvc: str) -> Card:
     digits = re.sub(r"[ -]", "", number or "")
-    if not re.fullmatch(r"\d{12,19}", digits):
+    if not re.fullmatch(r"[0-9]{12,19}", digits):
         raise _card_error("invalid_number", "card[number]", "The card number is not valid.")
     if not luhn_valid(digits):
         raise _card_error("incorrect_number", "card[number]", "The card number is incorrect.")
@@ -98,7 +92,7 @@ def tokenize(number: str, exp_month: str, exp_year: str, cvc: str) -> Card:
 
     brand = brand_for(digits)
     cvc_length = 4 if brand == "amex" else 3
-    if not re.fullmatch(rf"\d{{{cvc_length}}}", cvc or ""):
+    if not re.fullmatch(rf"[0-9]{{{cvc_length}}}", cvc or ""):
         raise _card_error("invalid_cvc", "card[cvc]", "The security code is invalid.")
 
     return Card(

@@ -6,7 +6,6 @@ idempotency key in the same transaction as the handler's writes, commits, and on
 returns. Anything raised rolls back this request's savepoint, which also frees the key.
 """
 
-import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -19,7 +18,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app import clock
+from app import clock, config
 from app.errors import ApiError
 from app.models import IdempotencyKey
 
@@ -39,8 +38,9 @@ class Result:
 
 
 def request_hash(request: Request, params: dict) -> str:
+    """Keyed (HMAC): a plain hash of params is brute-forceable when they're low-entropy."""
     canonical = json.dumps(params, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(f"{request.method} {request.url.path} {canonical}".encode()).hexdigest()
+    return config.keyed_hash("idempotency", f"{request.method} {request.url.path} {canonical}")
 
 
 def _load_key(db: Session, merchant_id: str, key: str):
@@ -108,12 +108,19 @@ def execute(
     merchant_id: str | None,
     params: dict,
     handler: Callable[[], dict | Result],
+    *,
+    hash_params: dict | None = None,
+    key_scope: str = "",
 ) -> JSONResponse:
+    """`hash_params`: what to hash instead of `params` (routes taking card data pass a
+    redacted copy). `key_scope`: a namespace for keys, e.g. "pk:" for publishable-key
+    requests, so public keys can't claim the merchant's secret-key idempotency keys."""
     # Stripe: keys apply to POST only; GET and DELETE ignore them.
     # Keys are stored per merchant, so unauthenticated calls (signup, login) take none.
     use_key = request.method == "POST" and merchant_id is not None
     key = request.headers.get("idempotency-key") if use_key else None
     request.state.idempotency_key = key  # what events record as request.idempotency_key
+    stored_key = key_scope + key if key is not None else None
     headers = {}
     # A savepoint per request: on any exception only this request's writes (and its key) are
     # undone, and the enclosing transaction (auth's read; in tests, the test's own data) stays
@@ -130,7 +137,8 @@ def execute(
                     f"Idempotency-Key must be 1 to {MAX_KEY_LENGTH} characters.",
                     code="idempotency_key_invalid",
                 )
-            stored = _claim(db, merchant_id, key, request_hash(request, params))
+            req_hash = request_hash(request, params if hash_params is None else hash_params)
+            stored = _claim(db, merchant_id, stored_key, req_hash)
         if stored is not None:
             status, body = stored.response_status, stored.response_body
             headers[REPLAY_HEADER] = "true"
@@ -143,7 +151,10 @@ def execute(
             if key is not None:
                 db.execute(
                     update(IdempotencyKey)
-                    .where(IdempotencyKey.merchant_id == merchant_id, IdempotencyKey.key == key)
+                    .where(
+                        IdempotencyKey.merchant_id == merchant_id,
+                        IdempotencyKey.key == stored_key,
+                    )
                     .values(response_status=status, response_body=body)
                 )
     # Serialise before committing, so an unserialisable body can't 500 after a durable write.

@@ -81,7 +81,27 @@ def create_payment_method(
         db.flush()
         return payment_method_json(pm)
 
-    return execute(db, request, auth.merchant.id, params, handler)
+    return execute(
+        db,
+        request,
+        auth.merchant.id,
+        params,
+        handler,
+        hash_params=_redacted(params),
+        key_scope="pk:",
+    )
+
+
+def _redacted(params: dict) -> dict:
+    """What the idempotency hash sees: no CVC, and the number only as its fingerprint."""
+    card = params.get("card")
+    if not isinstance(card, dict):
+        return params
+    safe = {k: v for k, v in card.items() if k not in ("number", "cvc")}
+    number = card.get("number")
+    if isinstance(number, str):
+        safe["number_fingerprint"] = cards.fingerprint(number)
+    return {**params, "card": safe}
 
 
 @router.get("/{pm_id}")
