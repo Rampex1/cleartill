@@ -26,6 +26,7 @@ def test_downgrade_then_upgrade_creates_tables(engine):
             "payment_methods",
             "payment_intents",
             "charges",
+            "refunds",
         ):
             assert conn.execute(text(f"SELECT to_regclass('{table}')")).scalar() == table
 
