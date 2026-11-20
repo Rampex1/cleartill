@@ -3,7 +3,7 @@
 
 import hmac
 from typing import Annotated, Literal
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict
@@ -47,15 +47,24 @@ def _not_found() -> ApiError:
 
 
 def _with_payment_intent(return_url: str, pi_id: str) -> str:
+    """Append payment_intent to return_url, leaving the merchant's own query bytes untouched."""
     parts = urlsplit(return_url)
-    query = parse_qsl(parts.query, keep_blank_values=True) + [("payment_intent", pi_id)]
-    return urlunsplit(parts._replace(query=urlencode(query)))
+    added = urlencode({"payment_intent": pi_id})
+    query = f"{parts.query}&{added}" if parts.query else added
+    return urlunsplit(parts._replace(query=query))
 
 
 @router.post("/3ds/{pi_id}")
 def three_ds(pi_id: str, request: Request, db: Db, params: Params):
     def handler():
         data = forms.validate(ThreeDSParams, params)
+        # Check the secret before taking any lock, so knowing a pi_id alone can't make the row
+        # contend (client_secret never changes, so an unlocked read is enough).
+        pi = db.get(PaymentIntent, pi_id)
+        if pi is None or not hmac.compare_digest(
+            pi.client_secret.encode(), data.client_secret.encode()
+        ):
+            raise _not_found()
         # Lock order (§5.2): M17 locks pi.checkout_session_id's session here, before the PI.
         pi = db.scalar(
             select(PaymentIntent)
@@ -63,16 +72,21 @@ def three_ds(pi_id: str, request: Request, db: Db, params: Params):
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        if pi is None or not hmac.compare_digest(
-            pi.client_secret.encode(), data.client_secret.encode()
-        ):
-            raise _not_found()
         require_status(pi, "three_ds")
         pm = db.get(PaymentMethod, pi.payment_method_id)
-        passed = data.result == "approve"
-        outcome = network.authorize(pm.sim_outcome, pi.amount, three_ds_passed=passed)
-        if passed and isinstance(outcome, network.Approved):
+        # ponytail: a challenge isn't bound to one confirm attempt (Stripe's is); an old
+        # challenge tab can complete a re-confirmed PI. Add a per-attempt nonce if that matters.
+        outcome = (
+            network.authorize(pm.sim_outcome, pi.amount, three_ds_passed=True)
+            if data.result == "approve"
+            else network.RequiresAuth()  # the cardholder failed the challenge
+        )
+        if isinstance(outcome, network.Approved):
             approve(db, pi, pm, request)
+        elif isinstance(outcome, network.Declined):
+            decline(
+                db, pi, pm, request, charge_code=outcome.code, decline_code=outcome.decline_code
+            )
         else:
             decline(
                 db,

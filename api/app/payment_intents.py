@@ -84,13 +84,17 @@ def create_pi(
     return pi
 
 
+VERBS = {"three_ds": "authenticate"}
+
+
 def require_status(pi, action: str) -> None:
     # ponytail: M17 also rejects /v1 update/confirm/cancel when pi.checkout_session_id is set.
     if pi.status not in ALLOWED_FROM[action]:
         raise ApiError(
             400,
             "invalid_request_error",
-            f"You cannot {action} this PaymentIntent because it has a status of {pi.status}.",
+            f"You cannot {VERBS.get(action, action)} this PaymentIntent because it has a status "
+            f"of {pi.status}.",
             code="payment_intent_unexpected_state",
         )
 
