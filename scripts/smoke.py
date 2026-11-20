@@ -1,28 +1,35 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["httpx2>=2.16"]
+# dependencies = ["cleartill"]
+#
+# [tool.uv.sources]
+# cleartill = { path = "../sdk" }
 # ///
 """End-to-end smoke test, and the README quickstart.
 
     docker compose up -d --build --wait
-    uv run --with ./sdk scripts/smoke.py http://localhost:8000
+    uv run scripts/smoke.py http://localhost:8000
 
 Signs up a fresh merchant, then takes real money paths through the API, the SDK, hosted
 checkout (with 3D Secure) and signed webhooks. Exits non-zero on the first failure."""
 
 import argparse
 import http.server
+import platform
 import sys
 import threading
 import time
 import uuid
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 import cleartill
 import httpx2
 
 DASHBOARD = {"X-Cleartill-Dashboard": "1"}
 EXP_YEAR = str(datetime.now(UTC).year + 5)
+MAX_WEBHOOK_BODY = 1_000_000
+WEBHOOK_WAIT_SECONDS = 30
 
 
 def step(name: str) -> None:
@@ -46,23 +53,59 @@ def card(number: str) -> dict:
 class Receiver:
     """A tiny local webhook endpoint that records raw bodies and signature headers."""
 
-    def __init__(self):
+    def __init__(self, bind: str, port: int):
         self.received: list[tuple[bytes, str]] = []
         received = self.received
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
-                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-                received.append((body, self.headers.get("Cleartill-Signature", "")))
+                length = int(self.headers.get("Content-Length") or 0)
+                if length > MAX_WEBHOOK_BODY:
+                    self.send_response(413)
+                    self.end_headers()
+                    return
+                received.append(
+                    (self.rfile.read(length), self.headers.get("Cleartill-Signature", ""))
+                )
                 self.send_response(200)
                 self.end_headers()
 
             def log_message(self, *args):
                 pass
 
-        self.server = http.server.ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+        self.server = http.server.ThreadingHTTPServer((bind, port), Handler)
         self.port = self.server.server_address[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+
+def default_bind() -> str:
+    # Docker Desktop (macOS, Windows) forwards host.docker.internal to the host's loopback;
+    # on Linux the containers reach the host through the bridge, so listen there too.
+    return "0.0.0.0" if platform.system() == "Linux" else "127.0.0.1"
+
+
+def wait_for_completed(receiver: Receiver, secret: str, sessions: set[str]) -> None:
+    deadline = time.monotonic() + WEBHOOK_WAIT_SECONDS
+    seen_sessions: set[str] = set()
+    events: set[str] = set()
+    invalid = 0
+    while time.monotonic() < deadline and not sessions <= seen_sessions:
+        time.sleep(0.5)
+        seen_sessions, events, invalid = set(), set(), 0
+        for body, header in list(receiver.received):
+            try:
+                event = cleartill.Webhook.construct_event(body, header, secret)
+            except cleartill.SignatureVerificationError:
+                invalid += 1  # not ours (or forged): never trusted, but reported
+                continue
+            events.add(event["id"])  # at-least-once delivery: dedupe on the event id
+            if event["type"] == "checkout.session.completed":
+                seen_sessions.add(event["data"]["object"]["id"])
+    check(
+        sessions <= seen_sessions,
+        f"expected checkout.session.completed for {sorted(sessions)}, got {sorted(seen_sessions)} "
+        f"({len(events)} valid events, {invalid} deliveries with bad signatures)",
+    )
 
 
 def main() -> int:
@@ -78,31 +121,59 @@ def main() -> int:
         default="host.docker.internal",
         help="how the API's worker reaches this machine (default: %(default)s)",
     )
+    parser.add_argument("--webhook-port", type=int, default=0, help="0 picks a free port")
+    parser.add_argument("--bind", default=default_bind(), help="receiver bind address")
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
+    local = urlsplit(base).hostname in {"localhost", "127.0.0.1"}
+    webhooks = not args.no_webhooks and (local or args.webhook_host != "host.docker.internal")
     http = httpx2.Client(base_url=base, timeout=30)
 
     step(f"health check {base}")
     check(http.get("/healthz").json().get("status") == "ok", "API is not healthy")
 
     step("sign up a merchant")
-    email = f"smoke-{uuid.uuid4().hex[:12]}@example.com"
     r = http.post(
         "/dashboard-api/signup",
-        data={"email": email, "password": uuid.uuid4().hex},
+        data={"email": f"smoke-{uuid.uuid4().hex[:12]}@example.com", "password": uuid.uuid4().hex},
         headers=DASHBOARD,
     )
     check(r.status_code == 200, f"signup failed: {r.status_code} {r.text}")
     keys = r.json()
-    client = cleartill.Client(keys["secret_key"], base_url=base)
 
-    receiver, secret = None, None
-    if not args.no_webhooks:
-        step("register a webhook endpoint")
-        receiver = Receiver()
-        url = f"http://{args.webhook_host}:{receiver.port}/webhooks"
-        secret = client.webhook_endpoints.create(url=url, enabled_events=["*"])["secret"]
+    with cleartill.Client(keys["secret_key"], base_url=base) as client:
+        endpoint = None
+        try:
+            if webhooks:
+                step("register a webhook endpoint")
+                receiver = Receiver(args.bind, args.webhook_port)
+                url = f"http://{args.webhook_host}:{receiver.port}/webhooks"
+                try:
+                    endpoint = client.webhook_endpoints.create(url=url, enabled_events=["*"])
+                except cleartill.InvalidRequestError as exc:
+                    raise SystemExit(
+                        f"FAILED: the API won't send webhooks to {url} ({exc.message}). "
+                        "Rerun with --no-webhooks, or point --webhook-host/--webhook-port at "
+                        "an address the API can reach."
+                    ) from None
+            else:
+                step("skip webhooks (not a local API; pass --webhook-host to check them)")
+            completed = run_payments(client, http)
+            if endpoint is not None:
+                step("signed webhooks arrive")
+                wait_for_completed(receiver, endpoint["secret"], completed)
+        finally:
+            if endpoint is not None:  # don't leave an endpoint retrying a dead port for days
+                client.webhook_endpoints.delete(endpoint["id"])
+    http.close()
 
+    # Never print the keys: this also runs against deployments, and CI logs are shared.
+    print(f"\nOK: {base} works end to end (merchant {keys['merchant']['id']}).")
+    return 0
+
+
+def run_payments(client: cleartill.Client, http: httpx2.Client) -> set[str]:
+    """The money paths; returns the checkout sessions that should complete."""
     step("customer")
     customer = client.customers.create(email="ada@example.com", metadata={"plan": "pro"})
     check(customer["id"].startswith("cus_"), "no customer id")
@@ -127,9 +198,12 @@ def main() -> int:
     )
     check(held["status"] == "requires_capture", f"hold status {held['status']}")
     captured = client.payment_intents.capture(held["id"], amount_to_capture=4000)
-    check(captured["amount_received"] == 4000, "partial capture")
+    check(
+        captured["status"] == "succeeded" and captured["amount_received"] == 4000,
+        f"partial capture: {captured['status']} {captured['amount_received']}",
+    )
     refund = client.refunds.create(payment_intent=held["id"], amount=1000)
-    check(refund["amount"] == 1000, "refund")
+    check(refund["status"] == "succeeded" and refund["amount"] == 1000, "refund")
 
     step("a declined card raises CardError")
     try:
@@ -142,21 +216,16 @@ def main() -> int:
 
     step("balance")
     balance = client.balance.retrieve()
-    check(balance["pending"][0]["amount"] > 0, "nothing pending after captures")
+    usd = sum(
+        b["amount"] for b in balance["pending"] + balance["available"] if b["currency"] == "usd"
+    )
+    check(usd > 0, f"no usd balance after captures: {balance}")
 
     def session() -> dict:
+        item = {"currency": "usd", "unit_amount": 1500, "product_data": {"name": "T-shirt"}}
         return client.checkout.sessions.create(
             mode="payment",
-            line_items=[
-                {
-                    "price_data": {
-                        "currency": "usd",
-                        "unit_amount": 1500,
-                        "product_data": {"name": "T-shirt"},
-                    },
-                    "quantity": 2,
-                },
-            ],
+            line_items=[{"price_data": item, "quantity": 2}],
             success_url="https://merchant.example/thanks?session={CHECKOUT_SESSION_ID}",
             cancel_url="https://merchant.example/cart",
         )
@@ -179,27 +248,7 @@ def main() -> int:
     )
     check(r.status_code == 200, f"3DS approve: {r.status_code} {r.text}")
     check(client.checkout.sessions.retrieve(cs3["id"])["status"] == "complete", "3DS session")
-
-    if receiver is not None:
-        step("signed webhooks arrive")
-        deadline = time.monotonic() + 30
-        completed = []
-        while time.monotonic() < deadline and len(completed) < 2:
-            time.sleep(0.5)
-            completed = []
-            for body, header in list(receiver.received):
-                event = cleartill.Webhook.construct_event(body, header, secret)
-                if event["type"] == "checkout.session.completed":
-                    completed.append(event["data"]["object"]["id"])
-        check(
-            sorted(completed) == sorted([cs["id"], cs3["id"]]),
-            f"expected 2 checkout.session.completed webhooks, got {completed} "
-            f"({len(receiver.received)} deliveries)",
-        )
-
-    # Never print the keys: this also runs against deployments, and CI logs are shared.
-    print(f"\nOK: {base} works end to end (merchant {keys['merchant']['id']}).")
-    return 0
+    return {cs["id"], cs3["id"]}
 
 
 if __name__ == "__main__":
