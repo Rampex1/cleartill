@@ -70,7 +70,17 @@ def create_refund(
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-    if charge is None or not charge.captured or charge.amount_captured == 0:
+    if charge is None and charge_id:
+        raise _invalid(
+            f"Charge {charge_id} doesn't belong to PaymentIntent {pi.id}.",
+            "parameter_invalid",
+            "charge",
+        )
+    if charge is None:
+        raise _invalid(
+            "This PaymentIntent has no captured charge to refund.", "charge_not_captured"
+        )
+    if not charge.captured or charge.amount_captured == 0:
         raise _invalid(
             "This charge hasn't been captured, so it can't be refunded.", "charge_not_captured"
         )
