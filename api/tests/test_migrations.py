@@ -12,5 +12,5 @@ def test_downgrade_then_upgrade_creates_tables(engine):
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")
     with engine.connect() as conn:
-        for table in ("merchants", "api_keys", "customers"):
+        for table in ("merchants", "api_keys", "customers", "idempotency_keys"):
             assert conn.execute(text(f"SELECT to_regclass('{table}')")).scalar() == table
