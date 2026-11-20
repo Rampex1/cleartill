@@ -1,4 +1,4 @@
-"""The worker process: `python -m app.worker` (design §5.1). M15 adds housekeeping."""
+"""The worker process: `python -m app.worker` (design §5.1, §5.9)."""
 
 import logging
 import signal
@@ -12,44 +12,56 @@ from app.ledger_check import ledger_check
 log = logging.getLogger("cleartill.worker")
 IDLE_SLEEP_SECONDS = 1.0
 HOUSEKEEPING_INTERVAL = 60
+DELIVERY_BUDGET_SECONDS = HOUSEKEEPING_INTERVAL  # a delivery backlog can't starve housekeeping
 _stop = threading.Event()
 _last_housekeeping: float | None = None
 
 
 def check_ledger_on_start(bind) -> list[str]:
-    """Reconcile once at startup; problems are CRITICAL but don't crash-loop the worker."""
-    problems = ledger_check(bind)
+    """Reconcile once at startup; problems are CRITICAL but never stop the worker."""
+    try:
+        problems = ledger_check(bind)
+    except Exception:
+        log.critical("ledger check could not run at startup", exc_info=True)
+        return ["ledger check could not run"]
     for problem in problems:
         log.critical("ledger check failed: %s", problem)
     return problems
 
 
-def run_once() -> int:
-    """Deliver everything that's due; returns how many deliveries were attempted."""
-    sent = 0
-    while not _stop.is_set() and delivery.deliver_one():
+def run_once(budget_seconds: float = DELIVERY_BUDGET_SECONDS) -> int:
+    """Deliver due webhooks for at most `budget_seconds`; returns how many were attempted."""
+    started, sent = time.monotonic(), 0
+    while not _stop.is_set() and time.monotonic() - started < budget_seconds:
+        if not delivery.deliver_one():
+            break
         sent += 1
     return sent
 
 
 def tick(now: float, session_factory=SessionLocal) -> bool:
-    """One loop iteration: deliver due webhooks, then housekeeping if a minute has passed.
-    Returns True if housekeeping ran."""
+    """One loop iteration: housekeeping first (once a minute), then webhook delivery. Neither
+    can block or break the other. Returns True if housekeeping ran."""
     global _last_housekeeping
-    run_once()
-    if _last_housekeeping is not None and now - _last_housekeeping < HOUSEKEEPING_INTERVAL:
-        return False
-    _last_housekeeping = now
-    results = housekeeping.run_housekeeping(session_factory)
-    if any(results.values()):
-        log.info("housekeeping %s", results)
-    return True
+    ran = _last_housekeeping is None or now - _last_housekeeping >= HOUSEKEEPING_INTERVAL
+    if ran:
+        _last_housekeeping = now
+        try:
+            log.info("housekeeping %s", housekeeping.run_housekeeping(session_factory))
+        except Exception:
+            log.exception("housekeeping failed")
+    try:
+        run_once()
+    except Exception:
+        log.exception("webhook delivery failed")
+    return ran
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     config.secret_key()
     config.public_base_url()
+    config.warn_if_insecure_urls(log)
     # SIGTERM (deploys): finish the current delivery, then stop.
     signal.signal(signal.SIGTERM, lambda *_: _stop.set())
     log.info("worker started")

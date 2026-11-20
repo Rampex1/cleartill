@@ -17,7 +17,11 @@ services:
       PUBLIC_BASE_URL: http://localhost:8000
       ALLOW_INSECURE_URLS: "1"  # local dev only: webhooks may target the host machine
     command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]  # dev only: never expose the insecure-URL setup to the LAN
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 2s
+      retries: 30
     depends_on:
       db:
         condition: service_healthy
@@ -33,4 +37,6 @@ services:
       db:
         condition: service_healthy
       api:
-        condition: service_started
+        condition: service_healthy  # the api runs the migrations before it serves
+    restart: unless-stopped
+    stop_grace_period: 20s  # > one webhook send (15 s), so SIGTERM can finish it
