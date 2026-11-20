@@ -7,12 +7,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
-from app.merchants import create_merchant
+from app.merchants import create_merchant, normalize_email
 from app.models import Merchant
 
 
 def seed(db: Session, email: str):
-    if db.scalar(select(Merchant.id).where(Merchant.email == email)):
+    if db.scalar(select(Merchant.id).where(Merchant.email == normalize_email(email))):
         raise ValueError(f"A merchant with email {email} already exists.")
     return create_merchant(db, email)
 
