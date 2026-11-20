@@ -7,4 +7,4 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY . .
 RUN useradd --system app
 USER app
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log"]
