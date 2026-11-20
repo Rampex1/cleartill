@@ -6,6 +6,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
@@ -101,6 +102,9 @@ class LedgerAccount(Base):
             "'card_network_clearing', 'platform_fees')",
             name="ledger_accounts_kind",
         ),
+        # Target of journal_entries' (account_id, currency) FK: an entry's currency must be
+        # its account's.
+        UniqueConstraint("id", "currency", name="uq_ledger_accounts_id_currency"),
     )
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -120,11 +124,18 @@ class JournalTransaction(Base):
 
 class JournalEntry(Base):
     __tablename__ = "journal_entries"
-    __table_args__ = (CheckConstraint("amount <> 0", name="journal_entries_nonzero"),)
+    __table_args__ = (
+        CheckConstraint("amount <> 0", name="journal_entries_nonzero"),
+        ForeignKeyConstraint(
+            ["account_id", "currency"],
+            ["ledger_accounts.id", "ledger_accounts.currency"],
+            name="fk_journal_entries_account_currency",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     transaction_id: Mapped[str] = mapped_column(ForeignKey("journal_transactions.id"), index=True)
-    account_id: Mapped[str] = mapped_column(ForeignKey("ledger_accounts.id"), index=True)
+    account_id: Mapped[str] = mapped_column(Text, index=True)
     amount: Mapped[int] = mapped_column(BigInteger)
     currency: Mapped[str] = mapped_column(Text)
 
@@ -136,7 +147,8 @@ class BalanceTransaction(Base):
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True)
-    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
+    # No CASCADE: a merchant with money history can't be deleted.
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"))
     type: Mapped[str] = mapped_column(Text)
     amount: Mapped[int] = mapped_column(BigInteger)
     fee: Mapped[int] = mapped_column(BigInteger)

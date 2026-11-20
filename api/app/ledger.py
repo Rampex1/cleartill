@@ -8,7 +8,7 @@ silently mis-booking money.
 import os
 from datetime import timedelta
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session
 
 from app import clock
@@ -84,6 +84,8 @@ def post_capture(
     db: Session, merchant_id: str, source_id: str, amount: int, currency: str = "usd"
 ) -> BalanceTransaction:
     """Captured funds: Dr clearing A, Cr merchant_pending net, Cr platform_fees fee."""
+    if amount < 1:
+        raise ValueError("capture amount must be at least 1")
     charge_fee = fee(amount)
     net = amount - charge_fee
     jtx_id = post(
@@ -117,27 +119,46 @@ def post_capture(
     return bt
 
 
-def release(db: Session, bt: BalanceTransaction) -> None:
-    """Pending → available: Dr merchant_pending net, Cr merchant_available net."""
-    if bt.net:
+def release(db: Session, bt: BalanceTransaction) -> bool:
+    """Pending → available: Dr merchant_pending net, Cr merchant_available net.
+
+    The status change is the gate: only one caller can flip a pending charge to available
+    (concurrent callers wait on the row and then match nothing), so a retried or racing
+    release never moves money twice. Returns False if there was nothing to release."""
+    db.flush()
+    net = db.scalar(
+        update(BalanceTransaction)
+        .where(
+            BalanceTransaction.id == bt.id,
+            BalanceTransaction.type == "charge",
+            BalanceTransaction.status == "pending",
+        )
+        .values(status="available")
+        .returning(BalanceTransaction.net)
+    )
+    db.refresh(bt)
+    if net is None:
+        return False
+    if net:
         post(
             db,
             "release",
             bt.id,
             bt.currency,
             [
-                (account_id(db, bt.merchant_id, "merchant_pending", bt.currency), bt.net),
-                (account_id(db, bt.merchant_id, "merchant_available", bt.currency), -bt.net),
+                (account_id(db, bt.merchant_id, "merchant_pending", bt.currency), net),
+                (account_id(db, bt.merchant_id, "merchant_available", bt.currency), -net),
             ],
         )
-    bt.status = "available"
-    db.flush()
+    return True
 
 
 def post_refund(
     db: Session, merchant_id: str, source_id: str, amount: int, currency: str = "usd"
 ) -> BalanceTransaction:
     """Dr merchant_available R, Cr clearing R. Fees aren't returned; available may go < 0."""
+    if amount < 1:
+        raise ValueError("refund amount must be at least 1")
     jtx_id = post(
         db,
         "refund",
