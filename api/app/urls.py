@@ -91,16 +91,19 @@ def _lookup(host: str, port: int, bad: ApiError, for_sender: bool = False) -> li
             code="url_invalid",
             param="url",
         )
-    future = None
     try:
         future = pool.submit(_resolve, host, port)
+    except Exception:
+        slots.release()
+        raise
+    # Release the slot when the lookup really ends (not on our timeout), so slots bound the
+    # number of stuck resolver threads.
+    future.add_done_callback(lambda _: slots.release())
+    try:
         return future.result(timeout=RESOLVE_TIMEOUT_SECONDS)
     except (OSError, FutureTimeout, UnicodeError):
+        future.cancel()
         raise bad from None
-    finally:
-        if future is not None:
-            future.cancel()
-        slots.release()
 
 
 def validate_webhook_url(url: str, *, for_sender: bool = False) -> list[str]:

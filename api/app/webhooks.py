@@ -23,13 +23,15 @@ def sign(secret: str, timestamp: int, payload: str) -> str:
 
 
 def verify(
-    payload: str,
+    payload: str | bytes,
     header: str,
     secret: str,
     tolerance: int = DEFAULT_TOLERANCE,
     now: int | None = None,
 ) -> bool:
     """Accept any matching v1 (several during secret rotation); ignore other schemes."""
+    if isinstance(payload, bytes):
+        payload = payload.decode()
     timestamp, signatures = None, []
     for item in (header or "").split(","):
         key, _, value = item.strip().partition("=")
