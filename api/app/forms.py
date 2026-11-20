@@ -174,3 +174,36 @@ class ListParams(BaseModel):
     limit: int = Field(10, ge=1, le=100)
     starting_after: str | None = None
     ending_before: str | None = None
+
+
+def _strict_digits(value):
+    """Money and counts arrive as plain ASCII digits: no "1_000", " 100", "+1", "1000.0"."""
+    if isinstance(value, str) and not re.fullmatch(r"[0-9]{1,12}", value):
+        raise PydanticCustomError("int_parsing", "must be an integer")
+    return value
+
+
+FormInt = Annotated[int, BeforeValidator(_strict_digits)]
+MAX_AMOUNT = 99_999_999  # 8 digits, as on Stripe
+
+
+def require_amount(
+    value: int, *, minimum: int = 1, maximum: int = MAX_AMOUNT, param: str = "amount"
+) -> int:
+    if value < minimum:
+        raise ApiError(
+            400,
+            "invalid_request_error",
+            f"Amount must be at least {minimum} (in cents).",
+            code="amount_too_small",
+            param=param,
+        )
+    if value > maximum:
+        raise ApiError(
+            400,
+            "invalid_request_error",
+            f"Amount must be at most {maximum} (in cents).",
+            code="amount_too_large",
+            param=param,
+        )
+    return value
