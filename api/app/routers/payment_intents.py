@@ -12,6 +12,7 @@ from app.events import emit
 from app.executor import execute
 from app.models import Customer, PaymentIntent
 from app.payment_intents import (
+    capture_pi,
     confirm_pi,
     create_pi,
     pi_json,
@@ -65,6 +66,12 @@ class ConfirmParams(BaseModel):
 
     payment_method: str | None = None
     return_url: str | None = None
+
+
+class CaptureParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    amount_to_capture: forms.FormInt | None = None
 
 
 class ListParams(forms.ListParams):
@@ -186,5 +193,22 @@ def confirm_payment_intent(pi_id: str, request: Request, auth: Auth, db: Db, par
         )
         pm = resolve_payment_method(db, merchant_id, data.payment_method)
         return confirm_pi(db, pi, payment_method=pm, return_url=return_url, request=request)
+
+    return execute(db, request, auth.merchant.id, params, handler)
+
+
+@router.post("/{pi_id}/capture")
+def capture_payment_intent(pi_id: str, request: Request, auth: Auth, db: Db, params: Params):
+    def handler():
+        data = forms.validate(CaptureParams, params)
+        pi = get_owned(db, PaymentIntent, pi_id, auth.merchant.id, for_update=True)
+        require_status(pi, "capture")
+        amount = data.amount_to_capture
+        if amount is None:
+            amount = pi.amount_capturable
+        forms.require_amount(
+            amount, minimum=1, maximum=pi.amount_capturable, param="amount_to_capture"
+        )
+        return capture_pi(db, pi, amount, request)
 
     return execute(db, request, auth.merchant.id, params, handler)
