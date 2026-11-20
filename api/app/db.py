@@ -10,6 +10,8 @@ DATABASE_URL = os.environ["DATABASE_URL"].replace("postgresql://", "postgresql+p
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
+    # Never put bind parameters (emails, secrets, card-derived data) into exception text.
+    hide_parameters=True,
     pool_timeout=5,
     connect_args={"connect_timeout": 5},
 )
