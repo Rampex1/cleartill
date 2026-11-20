@@ -27,6 +27,8 @@ def test_downgrade_then_upgrade_creates_tables(engine):
             "payment_intents",
             "charges",
             "refunds",
+            "webhook_endpoints",
+            "webhook_deliveries",
         ):
             assert conn.execute(text(f"SELECT to_regclass('{table}')")).scalar() == table
 
