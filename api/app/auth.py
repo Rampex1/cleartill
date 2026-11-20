@@ -21,7 +21,6 @@ SAFE_METHODS = {"GET", "HEAD"}
 class AuthContext:
     merchant: Merchant
     kind: str  # "secret" | "publishable"
-    via: str = "api_key"  # "api_key" | "session"
 
 
 def check_csrf(request: Request) -> None:
@@ -41,16 +40,21 @@ def _session_context(request: Request, db: Session) -> AuthContext | None:
         return None
     check_csrf(request)
     request.state.merchant_id = merchant.id
-    return AuthContext(merchant=merchant, kind="secret", via="session")
+    return AuthContext(merchant=merchant, kind="secret")
+
+
+def _not_logged_in() -> ApiError:
+    # No WWW-Authenticate: a Basic challenge would make browsers pop a native login box.
+    return ApiError(
+        401, "invalid_request_error", "You are not logged in.", code="not_authenticated"
+    )
 
 
 def require_session(request: Request, db: Annotated[Session, Depends(get_db)]) -> AuthContext:
     """Dashboard-only endpoints: the session cookie, never an API key."""
     ctx = _session_context(request, db)
     if ctx is None:
-        raise ApiError(
-            401, "invalid_request_error", "You are not logged in.", code="not_authenticated"
-        )
+        raise _not_logged_in()
     return ctx
 
 
@@ -98,6 +102,8 @@ def authenticate(request: Request, db: Annotated[Session, Depends(get_db)]) -> A
         ctx = _session_context(request, db)
         if ctx is not None:
             return ctx
+        if COOKIE_NAME in request.cookies or CSRF_HEADER in request.headers:
+            raise _not_logged_in()  # a dashboard request whose session expired
     key = _key_from_header(header)
     row = db.execute(
         select(ApiKey.kind, Merchant)
