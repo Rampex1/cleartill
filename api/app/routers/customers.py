@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app import forms
 from app.auth import AuthContext, require_secret_key
 from app.db import get_db
+from app.executor import execute
 from app.ids import new_id
 from app.models import Customer
 from app.tenancy import get_owned, paginate
@@ -56,20 +57,21 @@ def _parse(params: dict) -> tuple[CustomerParams, bool]:
 
 
 @router.post("")
-def create_customer(auth: Auth, db: Db, params: Params):
-    data, _ = _parse(params)
-    customer = Customer(
-        id=new_id("cus_"),
-        merchant_id=auth.merchant.id,
-        email=data.email or None,
-        name=data.name or None,
-        metadata_=forms.apply_metadata({}, data.metadata, clear=False),
-    )
-    db.add(customer)
-    db.flush()
-    body = customer_json(customer)
-    db.commit()  # M4's request executor takes over transaction handling.
-    return body
+def create_customer(request: Request, auth: Auth, db: Db, params: Params):
+    def handler():
+        data, _ = _parse(params)
+        customer = Customer(
+            id=new_id("cus_"),
+            merchant_id=auth.merchant.id,
+            email=data.email or None,
+            name=data.name or None,
+            metadata_=forms.apply_metadata({}, data.metadata, clear=False),
+        )
+        db.add(customer)
+        db.flush()
+        return customer_json(customer)
+
+    return execute(db, request, auth.merchant.id, params, handler)
 
 
 @router.get("")
@@ -93,28 +95,32 @@ def retrieve_customer(customer_id: str, auth: Auth, db: Db, params: Params):
 
 
 @router.post("/{customer_id}")
-def update_customer(customer_id: str, auth: Auth, db: Db, params: Params):
-    data, clear_metadata = _parse(params)
-    customer = get_owned(db, Customer, customer_id, auth.merchant.id, for_update=True)
-    sent = data.model_fields_set
-    if "email" in sent:
-        customer.email = data.email or None
-    if "name" in sent:
-        customer.name = data.name or None
-    if clear_metadata or data.metadata is not None:
-        customer.metadata_ = forms.apply_metadata(customer.metadata_, data.metadata, clear_metadata)
-    db.flush()
-    body = customer_json(customer)
-    db.commit()
-    return body
+def update_customer(customer_id: str, request: Request, auth: Auth, db: Db, params: Params):
+    def handler():
+        data, clear_metadata = _parse(params)
+        customer = get_owned(db, Customer, customer_id, auth.merchant.id, for_update=True)
+        sent = data.model_fields_set
+        if "email" in sent:
+            customer.email = data.email or None
+        if "name" in sent:
+            customer.name = data.name or None
+        if clear_metadata or data.metadata is not None:
+            customer.metadata_ = forms.apply_metadata(
+                customer.metadata_, data.metadata, clear_metadata
+            )
+        db.flush()
+        return customer_json(customer)
+
+    return execute(db, request, auth.merchant.id, params, handler)
 
 
 @router.delete("/{customer_id}")
-def delete_customer(customer_id: str, auth: Auth, db: Db, params: Params):
-    forms.validate(forms.NoParams, params)
-    customer = get_owned(db, Customer, customer_id, auth.merchant.id, for_update=True)
-    customer.deleted = True
-    db.flush()
-    body = deleted_json(customer)
-    db.commit()
-    return body
+def delete_customer(customer_id: str, request: Request, auth: Auth, db: Db, params: Params):
+    def handler():
+        forms.validate(forms.NoParams, params)
+        customer = get_owned(db, Customer, customer_id, auth.merchant.id, for_update=True)
+        customer.deleted = True
+        db.flush()
+        return deleted_json(customer)
+
+    return execute(db, request, auth.merchant.id, params, handler)

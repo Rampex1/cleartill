@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Integer,
     Text,
     false,
     text,
@@ -58,4 +59,16 @@ class Customer(Base):
         "metadata", JSONB, default=dict, server_default=text("'{}'::jsonb")
     )
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+
+
+class IdempotencyKey(Base):
+    __tablename__ = "idempotency_keys"
+    __table_args__ = (Index("ix_idempotency_keys_created", "created"),)
+
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"), primary_key=True)
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    request_hash: Mapped[str] = mapped_column(Text)
+    response_status: Mapped[int | None] = mapped_column(Integer)
+    response_body: Mapped[dict | None] = mapped_column(JSONB)
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
