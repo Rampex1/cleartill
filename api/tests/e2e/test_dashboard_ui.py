@@ -110,6 +110,9 @@ def test_signup_shows_keys_then_continues_to_empty_payments(page, ui):  # noqa: 
     page.goto(f"{ui}/dashboard/login")
     page.get_by_role("link", name="Create an account").click()
     page.wait_for_url(f"{ui}/dashboard/signup")
+    # Login and signup both have an "Email" field: wait for the signup form to replace the
+    # login form, or the fill can land in the old one (seen once in CI).
+    expect(page.get_by_role("heading", name="Create an account")).to_be_visible()
     page.get_by_label("Email").fill(email())
     page.get_by_label("Password").fill(PW)
     page.get_by_role("button", name="Create account").click()
