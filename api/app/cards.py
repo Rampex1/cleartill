@@ -120,3 +120,23 @@ def payment_method_json(pm) -> dict:
         "created": int(pm.created.timestamp()),
         "livemode": False,
     }
+
+
+def save(db, merchant_id: str, card: Card):
+    """Persist a tokenized card as a PaymentMethod (only brand/last4/expiry/fingerprint)."""
+    from app.ids import new_id
+    from app.models import PaymentMethod
+
+    pm = PaymentMethod(
+        id=new_id("pm_"),
+        merchant_id=merchant_id,
+        brand=card.brand,
+        last4=card.last4,
+        exp_month=card.exp_month,
+        exp_year=card.exp_year,
+        fingerprint=card.fingerprint,
+        sim_outcome=card.sim_outcome,
+    )
+    db.add(pm)
+    db.flush()
+    return pm

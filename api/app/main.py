@@ -13,6 +13,7 @@ from app.routers import (
     balance,
     charges,
     checkout,
+    checkout_sessions,
     customers,
     dashboard,
     events,
@@ -39,6 +40,7 @@ app.include_router(charges.router)
 app.include_router(refunds.router)
 app.include_router(webhook_endpoints.router)
 app.include_router(checkout.router)
+app.include_router(checkout_sessions.router)
 
 
 @app.get("/healthz")

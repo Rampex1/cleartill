@@ -9,7 +9,6 @@ from app.auth import AuthContext, require_publishable_key, require_secret_key
 from app.cards import payment_method_json
 from app.db import get_db
 from app.executor import execute
-from app.ids import new_id
 from app.models import PaymentMethod
 from app.tenancy import get_owned
 
@@ -51,19 +50,7 @@ def create_payment_method(
         card = cards.tokenize(
             data.card.number, data.card.exp_month, data.card.exp_year, data.card.cvc
         )
-        pm = PaymentMethod(
-            id=new_id("pm_"),
-            merchant_id=auth.merchant.id,
-            brand=card.brand,
-            last4=card.last4,
-            exp_month=card.exp_month,
-            exp_year=card.exp_year,
-            fingerprint=card.fingerprint,
-            sim_outcome=card.sim_outcome,
-        )
-        db.add(pm)
-        db.flush()
-        return payment_method_json(pm)
+        return payment_method_json(cards.save(db, auth.merchant.id, card))
 
     return execute(
         db,

@@ -16,6 +16,7 @@ from app.payment_intents import (
     confirm_pi,
     create_pi,
     pi_json,
+    require_not_checkout,
     require_status,
     resolve_payment_method,
 )
@@ -149,6 +150,7 @@ def update_payment_intent(pi_id: str, request: Request, auth: Auth, db: Db, para
         data = forms.validate(UpdateParams, params_)
         merchant_id = auth.merchant.id
         pi = get_owned(db, PaymentIntent, pi_id, merchant_id, for_update=True)
+        require_not_checkout(pi)
         require_status(pi, "update")
         pi.last_payment_error = None  # Stripe clears it on any update
         sent = data.model_fields_set
@@ -175,6 +177,7 @@ def cancel_payment_intent(pi_id: str, request: Request, auth: Auth, db: Db, para
         params_ = {k: v for k, v in params.items() if not (k == "cancellation_reason" and v == "")}
         data = forms.validate(CancelParams, params_)
         pi = get_owned(db, PaymentIntent, pi_id, auth.merchant.id, for_update=True)
+        require_not_checkout(pi)
         require_status(pi, "cancel")
         pi.status = "canceled"
         pi.cancellation_reason = data.cancellation_reason
@@ -193,6 +196,7 @@ def confirm_payment_intent(pi_id: str, request: Request, auth: Auth, db: Db, par
         data = forms.validate(ConfirmParams, params)
         merchant_id = auth.merchant.id
         pi = get_owned(db, PaymentIntent, pi_id, merchant_id, for_update=True)
+        require_not_checkout(pi)
         return_url = (
             validate_redirect_url(data.return_url, "return_url") if data.return_url else None
         )

@@ -87,8 +87,18 @@ def create_pi(
 VERBS = {"three_ds": "authenticate"}
 
 
+def require_not_checkout(pi) -> None:
+    """/v1 can't update, confirm or cancel a PI that a checkout session owns (§5.2)."""
+    if pi.checkout_session_id is not None:
+        raise ApiError(
+            400,
+            "invalid_request_error",
+            "This PaymentIntent is managed by a Checkout Session and can't be changed directly.",
+            code="payment_intent_unexpected_state",
+        )
+
+
 def require_status(pi, action: str) -> None:
-    # ponytail: M17 also rejects /v1 update/confirm/cancel when pi.checkout_session_id is set.
     if pi.status not in ALLOWED_FROM[action]:
         raise ApiError(
             400,
