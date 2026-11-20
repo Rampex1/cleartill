@@ -20,24 +20,28 @@ class Webhook:
         *,
         now: int | None = None,
     ) -> dict:
-        """Return the event if `sig_header` is a valid, fresh signature of the raw `payload`.
-        Pass the raw request body: re-serialised JSON won't match."""
-        body = payload.decode() if isinstance(payload, bytes) else payload
+        """Return the event if `sig_header` is a valid signature of the raw `payload` made within
+        `tolerance` seconds of now (either direction, like the server's verifier). Pass the raw
+        request body: re-serialised JSON won't match. Any bad input raises
+        SignatureVerificationError, never another exception."""
+        raw = payload if isinstance(payload, bytes) else payload.encode()
         timestamp, signatures = None, []
         for part in (sig_header or "").split(","):
             key, _, value = part.strip().partition("=")
-            if key == "t" and value.isdigit():
+            if key == "t" and value.isascii() and value.isdigit():
                 timestamp = int(value)
-            elif key == "v1":
-                signatures.append(value)
+            elif key == "v1" and value.isascii():
+                signatures.append(value.encode())
         if timestamp is None or not signatures:
             raise SignatureVerificationError("Malformed signature header.")
-        expected = hmac.new(
-            secret.encode(), f"{timestamp}.{body}".encode(), hashlib.sha256
-        ).hexdigest()
-        if not any(hmac.compare_digest(expected, s) for s in signatures):
+        expected = hmac.new(secret.encode(), f"{timestamp}.".encode() + raw, hashlib.sha256)
+        digest = expected.hexdigest().encode()
+        if not any(hmac.compare_digest(digest, s) for s in signatures):
             raise SignatureVerificationError("No signature matches the payload.")
         current = int(time.time()) if now is None else now
-        if tolerance and current - timestamp > tolerance:
-            raise SignatureVerificationError("The signature's timestamp is too old.")
-        return json.loads(body)
+        if abs(current - timestamp) > tolerance:
+            raise SignatureVerificationError("The signature's timestamp is outside the tolerance.")
+        try:
+            return json.loads(raw)
+        except ValueError as exc:
+            raise SignatureVerificationError("The payload is not valid JSON.") from exc

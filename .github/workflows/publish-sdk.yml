@@ -11,16 +11,29 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     environment: testpypi
+    timeout-minutes: 15
+    # Job permissions replace the workflow's: keep contents:read (private repo checkout).
     permissions:
+      contents: read
       id-token: write
+    defaults:
+      run:
+        working-directory: sdk
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.8.22"
+      - name: Tag matches the package version
+        run: |
+          version=$(uv version --short)
+          test "${GITHUB_REF_NAME#sdk-v}" = "$version" || {
+            echo "tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
+      - run: uv sync --frozen
+      - run: uv run pytest -q
       - run: uv build
-        working-directory: sdk
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      # Pinned to a commit: this step runs with id-token:write.
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: sdk/dist/

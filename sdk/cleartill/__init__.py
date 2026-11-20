@@ -14,11 +14,14 @@ from cleartill._errors import (
     AuthenticationError,
     CardError,
     CleartillError,
+    CleartillPermissionError,
     IdempotencyError,
     InvalidRequestError,
-    PermissionError,
     RateLimitError,
     SignatureVerificationError,
+)
+from cleartill._errors import (
+    PermissionError as PermissionError,  # public, but kept out of __all__ (builtin name)
 )
 from cleartill._webhook import Webhook
 
@@ -28,10 +31,10 @@ __all__ = [
     "AuthenticationError",
     "CardError",
     "CleartillError",
+    "CleartillPermissionError",
     "Client",
     "IdempotencyError",
     "InvalidRequestError",
-    "PermissionError",
     "RateLimitError",
     "SignatureVerificationError",
     "Webhook",
