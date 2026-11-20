@@ -1,28 +1,40 @@
 import os
-import sys
 from pathlib import Path
 
 import pytest
+from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from testcontainers.postgres import PostgresContainer
-
-from alembic import command
+from testcontainers.community.postgres import PostgresContainer
 
 API_DIR = Path(__file__).resolve().parent.parent
-# The `pytest` entrypoint does not put the project root on sys.path.
-sys.path.insert(0, str(API_DIR))
+_container = PostgresContainer("postgres:16", driver="psycopg")
+_saved_database_url = None
+
+
+def pytest_configure(config):
+    # Start Postgres before collection: app.db reads DATABASE_URL at import time, so test
+    # modules may then `from app.main import app` at the top level.
+    global _saved_database_url
+    _saved_database_url = os.environ.get("DATABASE_URL")
+    _container.start()
+    os.environ["DATABASE_URL"] = _container.get_connection_url()
+    command.upgrade(Config(str(API_DIR / "alembic.ini")), "head")
+
+
+def pytest_unconfigure(config):
+    _container.stop()
+    if _saved_database_url is None:
+        os.environ.pop("DATABASE_URL", None)
+    else:
+        os.environ["DATABASE_URL"] = _saved_database_url
 
 
 @pytest.fixture(scope="session")
 def pg():
-    with PostgresContainer("postgres:16", driver="psycopg") as container:
-        url = container.get_connection_url()
-        os.environ["DATABASE_URL"] = url
-        command.upgrade(Config(str(API_DIR / "alembic.ini")), "head")
-        yield url
+    return os.environ["DATABASE_URL"]
 
 
 @pytest.fixture(scope="session")

@@ -8,3 +8,4 @@ Stripe-style payments API (learning clone). Design: `research/design/stripe-clon
 - Run locally: `docker compose up -d --build` → `curl localhost:8000/healthz`
 - New migration: `cd api && uv run alembic revision -m "..."` (hand-written SQL is fine).
 - Tests use a per-test outer transaction with `join_transaction_mode="create_savepoint"`: a `commit()` in code under test only releases a savepoint.
+- `app.db` reads `DATABASE_URL` at import; tests get it from `pytest_configure` in `tests/conftest.py`, so top-level `from app.main import app` in test modules is fine.
