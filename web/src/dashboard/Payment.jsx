@@ -12,17 +12,20 @@ export default function Payment() {
   const [refunds, setRefunds] = useState([]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [captureKey, renewCaptureKey] = useIdempotencyKey();
-  const [refundKey, renewRefundKey] = useIdempotencyKey();
+  const [captureKeyFor, settleCapture] = useIdempotencyKey();
+  const [refundKeyFor, settleRefund] = useIdempotencyKey();
 
   const load = useCallback(async () => {
     const res = await dashGet(`/v1/payment_intents/${encodeURIComponent(id)}`);
     if (res.status !== 200) return setError(errorMessage(res));
     setPi(res.body);
+    let latest = null;
     if (res.body.latest_charge) {
       const c = await dashGet(`/v1/charges/${encodeURIComponent(res.body.latest_charge)}`);
-      if (c.status === 200) setCharge(c.body);
+      latest = c.status === 200 ? c.body : null; // never act on a stale charge
     }
+    setCharge(latest);
+    // ponytail: first 100 refunds only; paginate if a payment ever has more.
     const r = await dashGet(`/v1/refunds?${new URLSearchParams({ payment_intent: id, limit: 100 })}`);
     if (r.status === 200) setRefunds(r.body.data);
   }, [id]);
@@ -31,25 +34,27 @@ export default function Payment() {
     load();
   }, [load]);
 
-  async function act(path, fields, key, renew) {
+  async function act(path, fields, keyFor, settle) {
     setBusy(true);
     setError(null);
-    const res = await dashPost(path, fields, key);
-    renew(); // the response arrived: the next click is a new action
+    const res = await dashPost(path, fields, keyFor(fields));
+    settle(res.status); // keeps the key only when no response arrived (safe retry)
     if (res.status !== 200) setError(errorMessage(res));
     await load();
     setBusy(false);
+    return res.status === 200;
   }
 
   function capture() {
-    act(`/v1/payment_intents/${encodeURIComponent(id)}/capture`, {}, captureKey, renewCaptureKey);
+    act(`/v1/payment_intents/${encodeURIComponent(id)}/capture`, {}, captureKeyFor, settleCapture);
   }
 
-  function refund(event) {
+  async function refund(event) {
     event.preventDefault();
-    const amount = new FormData(event.currentTarget).get("amount").trim();
+    const form = event.currentTarget;
+    const amount = new FormData(form).get("amount").trim();
     const fields = { payment_intent: id, ...(amount ? { amount } : {}) };
-    act("/v1/refunds", fields, refundKey, renewRefundKey);
+    if (await act("/v1/refunds", fields, refundKeyFor, settleRefund)) form.reset();
   }
 
   if (!pi) {
@@ -106,8 +111,8 @@ export default function Payment() {
       {refundable && (
         <form onSubmit={refund} className="row refund">
           <label>
-            Refund amount
-            <input name="amount" inputMode="numeric" placeholder="All remaining (cents)" />
+            Refund amount (cents)
+            <input name="amount" inputMode="numeric" placeholder="Blank refunds all remaining" />
           </label>
           <button type="submit" disabled={busy}>
             Refund

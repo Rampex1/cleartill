@@ -29,7 +29,9 @@ def install(app: FastAPI) -> None:
         if path.startswith(DOCS_PATHS):
             headers.pop("Content-Security-Policy")
         response.headers.update(headers)
-        if path.startswith("/assets/"):  # content-hashed by Vite: safe to cache forever
+        if path.startswith(API_PREFIXES):  # may carry secrets (signup, key roll) or data
+            response.headers["Cache-Control"] = "no-store"
+        elif path.startswith("/assets/"):  # content-hashed by Vite: safe to cache forever
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         elif response.headers.get("content-type", "").startswith("text/html"):
             # Revalidate index.html so a deploy never strands browsers on deleted assets.

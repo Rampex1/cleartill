@@ -1,3 +1,4 @@
+# ruff: noqa: F811  (pytest fixtures shared from test_checkout_ui)
 """M19: the merchant dashboard SPA (signup, login, payments, capture/refund, API keys) in a real
 browser against a live server (committed data; rows stay behind).
 
@@ -90,7 +91,8 @@ def open_payment(page, ui, pi_id):  # noqa: F811
 
 
 def status(page, value):  # noqa: F811
-    return page.get_by_text(re.compile(rf"\b{value}\b")).first
+    """The PI's Status field only (the charge line also says "succeeded")."""
+    return page.locator('dt:text-is("Status") + dd').filter(has_text=re.compile(rf"^{value}$"))
 
 
 def refunds_for(sk, pi_id):
@@ -140,7 +142,7 @@ def test_login_capture_and_refund_payment(page, ui):  # noqa: F811
     expect(page.get_by_role("listitem").filter(has_text="Refunded $5.00")).to_be_visible()
 
     page.get_by_label("Refund amount").fill("")
-    page.get_by_role("button", name="Refund").dblclick()
+    page.get_by_role("button", name="Refund").click()
     refunded = page.get_by_role("listitem").filter(has_text="Refunded")
     expect(refunded).to_have_count(2)
     expect(refunded.filter(has_text="Refunded $15.00")).to_be_visible()
@@ -216,3 +218,98 @@ def test_capture_request_sends_csrf_and_idempotency_headers(page, ui):  # noqa: 
     assert headers.get("idempotency-key")
     assert "authorization" not in headers  # cookie-authenticated, no key in the browser
     expect(status(page, "succeeded")).to_be_visible()
+
+
+# --- idempotency keys (design §5.6): replay on double submit and lost responses --------------
+
+
+def captured_payment(page, ui):
+    _, addr, sk = committed_merchant()
+    pi = manual_capture_pi(sk)
+    with TestClient(app) as c:
+        r = c.post(f"/v1/payment_intents/{pi['id']}/capture", headers=sk_headers(sk))
+    assert r.status_code == 200, r.text
+    logged_in(page, ui, addr)
+    open_payment(page, ui, pi["id"])
+    return sk, pi
+
+
+def refund_posts(page, ui):
+    """Record each refund POST's Idempotency-Key and whether its response was a replay."""
+    seen = []
+    url = f"{ui}/v1/refunds"
+
+    def on_response(response):
+        request = response.request
+        if request.url == url and request.method == "POST":
+            seen.append(
+                (
+                    request.headers.get("idempotency-key"),
+                    response.headers.get("idempotent-replayed") == "true",
+                )
+            )
+
+    page.on("response", on_response)
+    return seen
+
+
+def test_double_submit_replays_instead_of_refunding_twice(page, ui):
+    sk, pi = captured_payment(page, ui)
+    seen = refund_posts(page, ui)
+    page.get_by_label("Refund amount").fill("500")
+    # Two submits in one task, before React can disable the button: only the key protects.
+    page.locator("form.refund").evaluate("f => { f.requestSubmit(); f.requestSubmit(); }")
+    expect(page.get_by_role("listitem").filter(has_text="Refunded $5.00")).to_have_count(1)
+    for _ in range(50):  # let both responses land
+        if len(seen) == 2:
+            break
+        page.wait_for_timeout(100)
+    assert len(seen) == 2, seen
+    assert seen[0][0] and seen[0][0] == seen[1][0], "both submits must share one key"
+    assert sorted(replayed for _, replayed in seen) == [False, True]
+    assert len(refunds_for(sk, pi["id"])) == 1
+    expect(page.get_by_role("alert")).to_have_count(0)
+
+
+def test_deliberate_second_refund_uses_a_new_key(page, ui):
+    sk, pi = captured_payment(page, ui)
+    seen = refund_posts(page, ui)
+    for expected in (1, 2):
+        page.get_by_label("Refund amount").fill("500")
+        page.get_by_role("button", name="Refund").click()
+        expect(page.get_by_role("listitem").filter(has_text="Refunded $5.00")).to_have_count(
+            expected
+        )
+    assert len(seen) == 2 and seen[0][0] != seen[1][0]
+    assert len(refunds_for(sk, pi["id"])) == 2
+    expect(page.get_by_label("Refund amount")).to_have_value("")  # cleared after success
+
+
+def test_retry_after_lost_response_reuses_the_key(page, ui):
+    sk, pi = captured_payment(page, ui)
+    url = f"{ui}/v1/refunds"
+    keys = []
+
+    def lose_first_response(route):
+        keys.append(route.request.headers.get("idempotency-key"))
+        if len(keys) == 1:
+            route.fetch()  # the server commits the refund...
+            route.abort()  # ...but the browser never sees the reply
+        else:
+            route.continue_()
+
+    page.route(url, lose_first_response)
+    seen = refund_posts(page, ui)
+    page.get_by_label("Refund amount").fill("500")
+    page.get_by_role("button", name="Refund").click()
+    expect(page.get_by_role("alert")).to_contain_text("retrying is safe")
+    # The lost attempt already committed: the page reloads and shows it.
+    expect(page.get_by_role("listitem").filter(has_text="Refunded $5.00")).to_have_count(1)
+    with page.expect_response(lambda r: r.url == url and r.request.method == "POST"):
+        page.get_by_role("button", name="Refund").click()
+    expect(page.get_by_role("alert")).to_have_count(0)
+    expect(page.get_by_role("listitem").filter(has_text="Refunded $5.00")).to_have_count(1)
+    assert len(keys) == 2 and keys[0] and keys[0] == keys[1]
+    # The lost attempt really committed: the retry got the stored response back.
+    assert [replayed for _, replayed in seen] == [True]
+    assert len(refunds_for(sk, pi["id"])) == 1

@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { dashPost, errorMessage } from "./dash.js";
 
-function Fields() {
+function Fields({ newPassword = false }) {
   return (
     <>
       <label>
@@ -12,7 +12,7 @@ function Fields() {
       </label>
       <label>
         Password
-        <input name="password" type="password" autoComplete="current-password" required />
+        <input name="password" type="password" autoComplete={newPassword ? "new-password" : "current-password"} required />
       </label>
     </>
   );
@@ -73,7 +73,11 @@ export function Signup() {
     });
     setBusy(false);
     if (res.status === 200) return setKeys(res.body);
-    setError(errorMessage(res));
+    setError(
+      res.status === 0
+        ? "Couldn't reach the server. If the account was created, log in and roll your secret key."
+        : errorMessage(res),
+    );
   }
 
   if (keys) {
@@ -102,7 +106,7 @@ export function Signup() {
     <main className="page">
       <h1>Create an account</h1>
       <form onSubmit={submit} className="card-form">
-        <Fields />
+        <Fields newPassword />
         {error && (
           <p className="error" role="alert">
             {error}

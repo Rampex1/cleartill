@@ -16,12 +16,18 @@ export default function Payments() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    let stale = false; // a slower, older page must not overwrite a newer one
     const query = new URLSearchParams({ limit: PAGE_SIZE });
     if (cursor) query.set("starting_after", cursor);
+    setError(null);
     dashGet(`/v1/payment_intents?${query}`).then((res) => {
+      if (stale) return;
       if (res.status === 200) setPage(res.body);
       else setError(errorMessage(res));
     });
+    return () => {
+      stale = true;
+    };
   }, [cursor]);
 
   return (
