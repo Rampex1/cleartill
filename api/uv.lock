@@ -172,6 +172,23 @@ wheels = [
 ]
 
 [[package]]
+name = "cleartill"
+version = "0.1.0"
+source = { editable = "../sdk" }
+dependencies = [
+    { name = "httpx2" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "httpx2", specifier = ">=2.16" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "ruff", specifier = ">=0.6" },
+]
+
+[[package]]
 name = "cleartill-api"
 version = "0.1.0"
 source = { virtual = "." }
@@ -186,6 +203,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "cleartill" },
     { name = "playwright" },
     { name = "pytest" },
     { name = "ruff" },
@@ -204,6 +222,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "cleartill", editable = "../sdk" },
     { name = "playwright", specifier = ">=1.65.2" },
     { name = "pytest", specifier = ">=9.2" },
     { name = "ruff", specifier = ">=0.17.6" },
