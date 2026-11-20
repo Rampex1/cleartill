@@ -219,8 +219,7 @@ class PaymentIntent(Base):
     __table_args__ = (
         Index("ix_payment_intents_merchant_seq", "merchant_id", "seq"),
         CheckConstraint(
-            "status IN ('requires_payment_method', 'requires_confirmation', 'requires_action', "
-            "'processing', 'requires_capture', 'canceled', 'succeeded')",
+            "status IN (" + ", ".join(f"'{s}'" for s in PI_STATUSES) + ")",
             name="payment_intents_status",
         ),
         CheckConstraint(
@@ -247,6 +246,8 @@ class PaymentIntent(Base):
     last_payment_error: Mapped[dict | None] = mapped_column(JSONB)
     next_action: Mapped[dict | None] = mapped_column(JSONB)
     cancellation_reason: Mapped[str | None] = mapped_column(Text)
+    # Set for PIs that a checkout session owns (M17 adds the FK and blocks /v1 mutations).
+    checkout_session_id: Mapped[str | None] = mapped_column(Text)
     metadata_: Mapped[dict] = mapped_column(
         "metadata", JSONB, default=dict, server_default=text("'{}'::jsonb")
     )

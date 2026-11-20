@@ -1,7 +1,7 @@
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -10,9 +10,8 @@ from app.auth import AuthContext, require_secret_key
 from app.db import get_db
 from app.events import emit
 from app.executor import execute
-from app.ids import new_id, random_string
 from app.models import Customer, PaymentIntent, PaymentMethod
-from app.payment_intents import pi_json, require_status
+from app.payment_intents import create_pi, pi_json, require_status
 from app.tenancy import get_owned, paginate
 from app.urls import validate_redirect_url
 
@@ -22,13 +21,13 @@ Auth = Annotated[AuthContext, Depends(require_secret_key)]
 Db = Annotated[Session, Depends(get_db)]
 Params = Annotated[dict, Depends(forms.params)]
 
-Amount = Annotated[int, Field(ge=50, le=99_999_999)]
+MIN_PI_AMOUNT = 50  # Stripe's usd minimum
 
 
 class CreateParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    amount: Amount
+    amount: forms.FormInt
     currency: Literal["usd"]
     customer: str | None = None
     payment_method: str | None = None
@@ -40,7 +39,7 @@ class CreateParams(BaseModel):
 class UpdateParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    amount: Amount | None = None
+    amount: forms.FormInt | None = None
     customer: str | None = None
     payment_method: str | None = None
     metadata: forms.Metadata | None = None
@@ -76,30 +75,25 @@ def create_payment_intent(request: Request, auth: Auth, db: Db, params: Params):
         params_, _ = forms.pop_metadata_clear(params)
         data = forms.validate(CreateParams, params_)
         merchant_id = auth.merchant.id
-        if data.return_url:
-            validate_redirect_url(data.return_url, "return_url")
+        forms.require_amount(data.amount, minimum=MIN_PI_AMOUNT)
+        return_url = (
+            validate_redirect_url(data.return_url, "return_url") if data.return_url else None
+        )
+        customer_id = _customer_id(db, merchant_id, data.customer)
         pm_id = _payment_method_id(db, merchant_id, data.payment_method)
-        pi_id = new_id("pi_")
-        pi = PaymentIntent(
-            id=pi_id,
-            merchant_id=merchant_id,
+        pi = create_pi(
+            db,
+            merchant_id,
             amount=data.amount,
             currency=data.currency,
-            status="requires_confirmation" if pm_id else "requires_payment_method",
             capture_method=data.capture_method,
-            amount_capturable=0,
-            amount_received=0,
-            customer_id=_customer_id(db, merchant_id, data.customer),
+            customer_id=customer_id,
             payment_method_id=pm_id,
-            client_secret=f"{pi_id}_secret_{random_string(24)}",
-            return_url=data.return_url,
-            metadata_=forms.apply_metadata({}, data.metadata, clear=False),
+            return_url=return_url,
+            metadata=forms.apply_metadata({}, data.metadata, clear=False),
+            request=request,
         )
-        db.add(pi)
-        db.flush()
-        body = pi_json(pi)
-        emit(db, merchant_id, "payment_intent.created", body, request)
-        return body
+        return pi_json(pi)
 
     return execute(db, request, auth.merchant.id, params, handler)
 
@@ -131,7 +125,7 @@ def update_payment_intent(pi_id: str, request: Request, auth: Auth, db: Db, para
         require_status(pi, "update")
         sent = data.model_fields_set
         if "amount" in sent:
-            pi.amount = data.amount
+            pi.amount = forms.require_amount(data.amount, minimum=MIN_PI_AMOUNT)
         if "customer" in sent:
             pi.customer_id = _customer_id(db, merchant_id, data.customer)
         if "payment_method" in sent:
@@ -150,7 +144,8 @@ def update_payment_intent(pi_id: str, request: Request, auth: Auth, db: Db, para
 @router.post("/{pi_id}/cancel")
 def cancel_payment_intent(pi_id: str, request: Request, auth: Auth, db: Db, params: Params):
     def handler():
-        data = forms.validate(CancelParams, params)
+        params_ = {k: v for k, v in params.items() if not (k == "cancellation_reason" and v == "")}
+        data = forms.validate(CancelParams, params_)
         pi = get_owned(db, PaymentIntent, pi_id, auth.merchant.id, for_update=True)
         require_status(pi, "cancel")
         pi.status = "canceled"

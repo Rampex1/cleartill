@@ -39,6 +39,7 @@ def upgrade() -> None:
         sa.Column("last_payment_error", JSONB),
         sa.Column("next_action", JSONB),
         sa.Column("cancellation_reason", sa.Text),
+        sa.Column("checkout_session_id", sa.Text),
         sa.Column("metadata", JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
         sa.CheckConstraint(
