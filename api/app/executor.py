@@ -113,6 +113,7 @@ def execute(
     # Keys are stored per merchant, so unauthenticated calls (signup, login) take none.
     use_key = request.method == "POST" and merchant_id is not None
     key = request.headers.get("idempotency-key") if use_key else None
+    request.state.idempotency_key = key  # what events record as request.idempotency_key
     headers = {}
     # A savepoint per request: on any exception only this request's writes (and its key) are
     # undone, and the enclosing transaction (auth's read; in tests, the test's own data) stays

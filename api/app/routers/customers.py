@@ -71,7 +71,7 @@ def create_customer(request: Request, auth: Auth, db: Db, params: Params):
         db.add(customer)
         db.flush()
         body = customer_json(customer)
-        emit(db, request, auth.merchant.id, "customer.created", body)
+        emit(db, auth.merchant.id, "customer.created", body, request)
         return body
 
     return execute(db, request, auth.merchant.id, params, handler)
@@ -102,6 +102,7 @@ def update_customer(customer_id: str, request: Request, auth: Auth, db: Db, para
     def handler():
         data, clear_metadata = _parse(params)
         customer = get_owned(db, Customer, customer_id, auth.merchant.id, for_update=True)
+        before = customer_json(customer)
         sent = data.model_fields_set
         if "email" in sent:
             customer.email = data.email or None
@@ -113,7 +114,8 @@ def update_customer(customer_id: str, request: Request, auth: Auth, db: Db, para
             )
         db.flush()
         body = customer_json(customer)
-        emit(db, request, auth.merchant.id, "customer.updated", body)
+        if body != before:  # a no-op update emits nothing
+            emit(db, auth.merchant.id, "customer.updated", body, request)
         return body
 
     return execute(db, request, auth.merchant.id, params, handler)
@@ -127,7 +129,7 @@ def delete_customer(customer_id: str, request: Request, auth: Auth, db: Db, para
         snapshot = customer_json(customer)  # Stripe's customer.deleted carries the full object
         customer.deleted = True
         db.flush()
-        emit(db, request, auth.merchant.id, "customer.deleted", snapshot)
+        emit(db, auth.merchant.id, "customer.deleted", snapshot, request)
         return deleted_json(customer)
 
     return execute(db, request, auth.merchant.id, params, handler)
