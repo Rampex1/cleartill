@@ -332,7 +332,7 @@ def test_other_merchants_session_is_404_and_not_listed(client, skh, other_skh):
 
 @pytest.mark.parametrize(
     ("suffix", "data"),
-    [("", {"description": "x"}), ("/confirm", {"payment_method": "pm_card_visa"}), ("/cancel", {})],
+    [("", {"metadata[k]": "x"}), ("/confirm", {"payment_method": "pm_card_visa"}), ("/cancel", {})],
 )
 def test_checkout_pi_mutations_are_blocked(client, skh, suffix, data):
     cs = create_session(client, skh)

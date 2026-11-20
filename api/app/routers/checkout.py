@@ -1,5 +1,5 @@
-"""Public endpoints for the hosted pages (design §5.3). No API key: the PI's client_secret
-(or, from M17, the checkout session id) is the credential."""
+"""Public endpoints for the hosted pages (design §5.3, §5.10). No API key: the checkout
+session id, or the PI's client_secret, is the credential."""
 
 import hmac
 from typing import Annotated, Literal
@@ -10,12 +10,13 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import forms, network
+from app import cards, checkout, forms, network
 from app.db import get_db
 from app.errors import ApiError
-from app.executor import execute
-from app.models import PaymentIntent, PaymentMethod
-from app.payment_intents import approve, decline, require_status
+from app.executor import Result, execute
+from app.models import CheckoutSession, PaymentIntent, PaymentMethod
+from app.payment_intents import approve, confirm_pi, decline, require_status
+from app.routers.payment_methods import CardParams
 
 router = APIRouter(prefix="/checkout-api")
 
@@ -65,7 +66,8 @@ def three_ds(pi_id: str, request: Request, db: Db, params: Params):
             pi.client_secret.encode(), data.client_secret.encode()
         ):
             raise _not_found()
-        # Lock order (§5.2): M17 locks pi.checkout_session_id's session here, before the PI.
+        if pi.checkout_session_id is not None:  # lock order (§5.2): session before PI
+            checkout.lock_session(db, pi.checkout_session_id)
         pi = db.scalar(
             select(PaymentIntent)
             .where(PaymentIntent.id == pi_id)
@@ -83,6 +85,7 @@ def three_ds(pi_id: str, request: Request, db: Db, params: Params):
         )
         if isinstance(outcome, network.Approved):
             approve(db, pi, pm, request)
+            checkout.complete_if_paid(db, pi, request)
         elif isinstance(outcome, network.Declined):
             decline(
                 db, pi, pm, request, charge_code=outcome.code, decline_code=outcome.decline_code
@@ -101,3 +104,67 @@ def three_ds(pi_id: str, request: Request, db: Db, params: Params):
         return {"redirect": _with_payment_intent(pi.return_url, pi.id)}
 
     return execute(db, request, None, params, handler)
+
+
+class PayParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    card: CardParams
+
+
+def _session_not_found() -> ApiError:
+    return ApiError(
+        404,
+        "invalid_request_error",
+        "No such checkout session.",
+        code="resource_missing",
+        param="session",
+    )
+
+
+@router.get("/sessions/{cs_id}")
+def view_session(cs_id: str, db: Db):
+    cs = db.get(CheckoutSession, cs_id)
+    if cs is None:
+        raise _session_not_found()
+    return checkout.public_json(db, cs)
+
+
+@router.post("/sessions/{cs_id}/pay")
+def pay_session(cs_id: str, request: Request, db: Db, params: Params):
+    """Card data lives only in memory here: never hashed, stored, logged or echoed.
+    ponytail: no per-IP rate limit (simulated network, nothing to card-test)."""
+
+    def handler():
+        data = forms.validate(PayParams, params)
+        cs = checkout.lock_session(db, cs_id)
+        if cs is None:
+            raise _session_not_found()
+        if not checkout.is_open(cs):
+            raise ApiError(
+                400,
+                "invalid_request_error",
+                "This checkout session is no longer accepting payments.",
+                code="checkout_session_unexpected_state",
+            )
+        pi = db.scalar(
+            select(PaymentIntent)
+            .where(PaymentIntent.id == cs.payment_intent_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        card = cards.tokenize(
+            data.card.number, data.card.exp_month, data.card.exp_year, data.card.cvc
+        )
+        pm = cards.save(db, cs.merchant_id, card)
+        out = confirm_pi(db, pi, payment_method=pm, request=request)
+        if isinstance(out, Result):  # declined: the error only, never the PI or its secret
+            error = out.body["error"]
+            keys = ("type", "code", "decline_code", "message")
+            return Result(out.status, {"error": {k: error[k] for k in keys if k in error}})
+        if pi.status == "requires_action":
+            return {"redirect": pi.next_action["redirect_to_url"]["url"]}
+        checkout.complete_if_paid(db, pi, request)
+        return {"redirect": checkout.success_redirect(cs)}
+
+    return execute(db, request, None, params, handler, hash_params={})
