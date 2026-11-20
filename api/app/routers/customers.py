@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from app import forms
 from app.auth import AuthContext, require_secret_key
 from app.db import get_db
-from app.errors import ApiError
 from app.ids import new_id
 from app.models import Customer
 from app.tenancy import get_owned, paginate
@@ -21,7 +20,6 @@ Params = Annotated[dict, Depends(forms.params)]
 
 Email = Annotated[str, StringConstraints(max_length=512)]
 Name = Annotated[str, StringConstraints(max_length=256)]
-MAX_METADATA_KEYS = 50
 
 
 class CustomerParams(BaseModel):
@@ -53,11 +51,7 @@ def deleted_json(c: Customer) -> dict:
 
 
 def _parse(params: dict) -> tuple[CustomerParams, bool]:
-    """`metadata=` (empty) means "clear all keys"; `metadata[k]=` means "remove k"."""
-    params = dict(params)
-    clear_metadata = params.get("metadata") == ""
-    if clear_metadata:
-        del params["metadata"]
+    params, clear_metadata = forms.pop_metadata_clear(params)
     return forms.validate(CustomerParams, params), clear_metadata
 
 
@@ -69,7 +63,7 @@ def create_customer(auth: Auth, db: Db, params: Params):
         merchant_id=auth.merchant.id,
         email=data.email or None,
         name=data.name or None,
-        metadata_={k: v for k, v in (data.metadata or {}).items() if v != ""},
+        metadata_=forms.apply_metadata({}, data.metadata, clear=False),
     )
     db.add(customer)
     db.flush()
@@ -84,7 +78,7 @@ def list_customers(auth: Auth, db: Db, params: Params):
     stmt = select(Customer).where(
         Customer.merchant_id == auth.merchant.id, Customer.deleted.is_(False)
     )
-    if lp.email is not None:
+    if lp.email:  # an empty filter means "no filter"
         stmt = stmt.where(Customer.email == lp.email)
     page = paginate(db, stmt, Customer, auth.merchant.id, lp, "/v1/customers")
     page["data"] = [customer_json(c) for c in page["data"]]
@@ -92,7 +86,8 @@ def list_customers(auth: Auth, db: Db, params: Params):
 
 
 @router.get("/{customer_id}")
-def retrieve_customer(customer_id: str, auth: Auth, db: Db):
+def retrieve_customer(customer_id: str, auth: Auth, db: Db, params: Params):
+    forms.validate(forms.NoParams, params)  # M12 adds expand[]
     customer = get_owned(db, Customer, customer_id, auth.merchant.id, include_deleted=True)
     return deleted_json(customer) if customer.deleted else customer_json(customer)
 
@@ -107,21 +102,7 @@ def update_customer(customer_id: str, auth: Auth, db: Db, params: Params):
     if "name" in sent:
         customer.name = data.name or None
     if clear_metadata or data.metadata is not None:
-        merged = {} if clear_metadata else dict(customer.metadata_)
-        for key, value in (data.metadata or {}).items():
-            if value == "":
-                merged.pop(key, None)
-            else:
-                merged[key] = value
-        if len(merged) > MAX_METADATA_KEYS:
-            raise ApiError(
-                400,
-                "invalid_request_error",
-                f"Metadata can have at most {MAX_METADATA_KEYS} keys.",
-                code="parameter_invalid",
-                param="metadata",
-            )
-        customer.metadata_ = merged
+        customer.metadata_ = forms.apply_metadata(customer.metadata_, data.metadata, clear_metadata)
     db.flush()
     body = customer_json(customer)
     db.commit()
@@ -129,7 +110,8 @@ def update_customer(customer_id: str, auth: Auth, db: Db, params: Params):
 
 
 @router.delete("/{customer_id}")
-def delete_customer(customer_id: str, auth: Auth, db: Db):
+def delete_customer(customer_id: str, auth: Auth, db: Db, params: Params):
+    forms.validate(forms.NoParams, params)
     customer = get_owned(db, Customer, customer_id, auth.merchant.id, for_update=True)
     customer.deleted = True
     db.flush()
