@@ -87,6 +87,7 @@ _PROBLEMS = {
     "dict_type": "must be a hash (use name[key]=value)",
     "list_type": "must be an array (use name[]=value)",
     "too_long": "has too many items",
+    "list_indexes": "must be an array with indexes 0, 1, 2, …",
 }
 
 

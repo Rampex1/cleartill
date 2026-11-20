@@ -1,9 +1,17 @@
-"""Stripe-style form parameters: `a[b]=1`, `a[]=x`, `a[0][n]=1` → nested dicts and lists."""
+"""Stripe-style form parameters: `a[b]=1`, `a[]=x`, `a[0][n]=1` → nested dicts and lists.
+
+`parse_params` is schema-agnostic: `a[0][n]=1` stays a dict keyed "0", because a hash such as
+`metadata[12345]=x` legitimately has digit keys. Fields that really are arrays declare
+`FormList[T]`, which turns a digit-keyed dict into a list.
+"""
 
 import re
+from typing import Annotated
 from urllib.parse import parse_qsl
 
 from fastapi import Request
+from pydantic import BeforeValidator
+from pydantic_core import PydanticCustomError
 
 from app.errors import ApiError
 
@@ -43,7 +51,7 @@ def parse_params(pairs: list[tuple[str, str]]) -> dict:
         if len(path) - 1 > MAX_DEPTH:
             raise _invalid(key, f"Parameters may be nested at most {MAX_DEPTH} levels deep.")
         _insert(root, path, value, key)
-    return {name: _finalize(node, name) for name, node in root.items()}
+    return root
 
 
 def _insert(root: dict, path: list[str], value: str, key: str) -> None:
@@ -69,16 +77,16 @@ def _insert(root: dict, path: list[str], value: str, key: str) -> None:
         node = child
 
 
-def _finalize(node, name: str):
-    """Dicts whose keys are all digits become lists; the indexes must be 0..n-1."""
-    if not isinstance(node, dict):
-        return node
-    out = {k: _finalize(v, f"{name}[{k}]") for k, v in node.items()}
-    if out and all(k.isdigit() for k in out):
-        if set(out) != {str(i) for i in range(len(out))}:
-            raise _invalid(name, "Array indexes must be contiguous, starting at 0.")
-        return [out[str(i)] for i in range(len(out))]
-    return out
+def _indexed_to_list(value):
+    """`{"0": a, "1": b}` (from `x[0]=a&x[1]=b`) → `[a, b]`; indexes must be 0..n-1."""
+    if not isinstance(value, dict):
+        return value
+    if set(value) != {str(i) for i in range(len(value))}:
+        raise PydanticCustomError("list_indexes", "array indexes must be 0..n-1")
+    return [value[str(i)] for i in range(len(value))]
+
+
+type FormList[T] = Annotated[list[T], BeforeValidator(_indexed_to_list)]
 
 
 async def params(request: Request) -> dict:
