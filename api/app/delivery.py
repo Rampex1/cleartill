@@ -127,12 +127,12 @@ def claim_manual(db: Session, merchant_id: str, delivery_id: str) -> Claim:
     commit, so no lock is held during the send. 409 while another send holds the claim."""
     delivery = get_owned(db, WebhookDelivery, delivery_id, merchant_id, for_update=True)
     endpoint = db.get(WebhookEndpoint, delivery.endpoint_id)
-    if endpoint.deleted:
+    if endpoint.deleted or endpoint.status != "enabled":  # the worker's claim skips these too
         raise ApiError(
             400,
             "invalid_request_error",
-            "This delivery's webhook endpoint has been deleted.",
-            code="resource_missing",
+            "This delivery's webhook endpoint is deleted or disabled.",
+            code="endpoint_unavailable",
         )
     claim_id = str(uuid.uuid4())
     row = db.execute(
@@ -148,14 +148,17 @@ def claim_manual(db: Session, merchant_id: str, delivery_id: str) -> Claim:
         )
     event = db.get(Event, delivery.event_id)
     body = event_json(event, pending_counts(db, [event.id]).get(event.id, 0))
-    db.commit()
-    return Claim(
+    # Build the claim from loaded values BEFORE committing: reading expired attributes after
+    # the commit would open a new transaction and hold a connection through the send.
+    claimed = Claim(
         delivery_id=delivery.id,
         claim_id=claim_id,
         url=endpoint.url,
         secret=endpoint.secret,
         payload=json.dumps(body, separators=(",", ":")),
     )
+    db.commit()
+    return claimed
 
 
 def signed_headers(claimed: Claim) -> dict:

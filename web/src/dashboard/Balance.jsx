@@ -14,13 +14,17 @@ export default function Balance() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    dashGet("/v1/balance").then((res) =>
-      res.status === 200 ? setBalance(res.body) : setError(errorMessage(res)),
-    );
+    let stale = false;
+    dashGet("/v1/balance").then((res) => {
+      if (!stale) res.status === 200 ? setBalance(res.body) : setError(errorMessage(res));
+    });
     // ponytail: newest 100 balance transactions; add paging when a merchant has more.
-    dashGet("/v1/balance_transactions?limit=100").then((res) =>
-      res.status === 200 ? setTxns(res.body.data) : setError(errorMessage(res)),
-    );
+    dashGet("/v1/balance_transactions?limit=100").then((res) => {
+      if (!stale) res.status === 200 ? setTxns(res.body.data) : setError(errorMessage(res));
+    });
+    return () => {
+      stale = true;
+    };
   }, []);
 
   return (

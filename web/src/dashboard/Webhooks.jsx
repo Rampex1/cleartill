@@ -11,6 +11,7 @@ export default function Webhooks() {
   const [keyFor, settle] = useIdempotencyKey();
 
   const load = useCallback(async () => {
+    // ponytail: first 100 endpoints; page with has_more if a merchant ever has more.
     const res = await dashGet("/v1/webhook_endpoints?limit=100");
     if (res.status === 200) setEndpoints(res.body.data);
     else setError(errorMessage(res));
