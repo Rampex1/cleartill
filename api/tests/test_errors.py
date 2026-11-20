@@ -26,8 +26,13 @@ errors.install(t)
 
 @t.post("/validate")
 async def validate(params: Annotated[dict, Depends(forms.params)]):
-    M.model_validate(params)
+    forms.validate(M, params)
     return {"ok": True}
+
+
+@t.get("/server-bug")
+def server_bug():
+    M.model_validate({"amount": "4242424242424242x"})
 
 
 @t.get("/ok")
@@ -143,6 +148,13 @@ def test_unhandled_exception_is_500_without_detail(tc):
     assert r.status_code == 500
     assert error(r)["type"] == "api_error"
     assert "secret detail" not in r.text
+
+
+def test_server_side_validation_error_is_500(tc):
+    r = tc.get("/server-bug")
+    assert r.status_code == 500
+    assert error(r)["type"] == "api_error"
+    assert "4242" not in r.text
 
 
 @pytest.mark.parametrize(
