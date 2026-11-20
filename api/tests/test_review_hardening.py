@@ -42,13 +42,13 @@ class Whole(BaseModel):
 
 @t.post("/v")
 async def v(params: Annotated[dict, Depends(forms.params)]):
-    Validated.model_validate(params)
+    forms.validate(Validated, params)
     return {"ok": True}
 
 
 @t.post("/whole")
 async def whole(params: Annotated[dict, Depends(forms.params)]):
-    Whole.model_validate(params)
+    forms.validate(Whole, params)
     return {"ok": True}
 
 
