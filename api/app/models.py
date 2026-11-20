@@ -175,3 +175,29 @@ class Event(Base):
     data: Mapped[dict] = mapped_column(JSONB)  # {"object": <snapshot>}; never updated
     request: Mapped[dict] = mapped_column(JSONB)  # {"id", "idempotency_key"}
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+
+
+class PaymentMethod(Base):
+    """A tokenized card. Never holds the card number or CVC."""
+
+    __tablename__ = "payment_methods"
+    __table_args__ = (
+        Index("ix_payment_methods_merchant_seq", "merchant_id", "seq"),
+        CheckConstraint(
+            "sim_outcome IN ('success', 'generic_decline', 'insufficient_funds', "
+            "'expired_card', 'incorrect_cvc', 'processing_error', 'requires_3ds')",
+            name="payment_methods_sim_outcome",
+        ),
+    )
+    object_name = "payment method"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
+    brand: Mapped[str] = mapped_column(Text)
+    last4: Mapped[str] = mapped_column(Text)
+    exp_month: Mapped[int] = mapped_column(Integer)
+    exp_year: Mapped[int] = mapped_column(Integer)
+    fingerprint: Mapped[str] = mapped_column(Text)
+    sim_outcome: Mapped[str] = mapped_column(Text)
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
