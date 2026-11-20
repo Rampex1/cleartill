@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app import forms
 from app.auth import AuthContext, require_secret_key
 from app.db import get_db
-from app.events import event_json
+from app.events import event_json, pending_counts
 from app.models import Event
 from app.tenancy import get_owned, paginate
 
@@ -30,11 +30,13 @@ def list_events(auth: Auth, db: Db, params: Params):
     if lp.type:
         stmt = stmt.where(Event.type == lp.type)
     page = paginate(db, stmt, Event, auth.merchant.id, lp, "/v1/events")
-    page["data"] = [event_json(e) for e in page["data"]]
+    counts = pending_counts(db, [e.id for e in page["data"]])
+    page["data"] = [event_json(e, counts.get(e.id, 0)) for e in page["data"]]
     return page
 
 
 @router.get("/{event_id}")
 def retrieve_event(event_id: str, auth: Auth, db: Db, params: Params):
     forms.validate(forms.NoParams, params)
-    return event_json(get_owned(db, Event, event_id, auth.merchant.id))
+    event = get_owned(db, Event, event_id, auth.merchant.id)
+    return event_json(event, pending_counts(db, [event.id]).get(event.id, 0))

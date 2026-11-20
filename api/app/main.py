@@ -18,6 +18,7 @@ from app.routers import (
     payment_intents,
     payment_methods,
     refunds,
+    webhook_endpoints,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -34,6 +35,7 @@ app.include_router(payment_methods.router)
 app.include_router(payment_intents.router)
 app.include_router(charges.router)
 app.include_router(refunds.router)
+app.include_router(webhook_endpoints.router)
 
 
 @app.get("/healthz")

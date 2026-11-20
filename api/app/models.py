@@ -15,7 +15,7 @@ from sqlalchemy import (
     false,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app import clock
@@ -331,3 +331,49 @@ class Refund(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     balance_transaction_id: Mapped[str] = mapped_column(ForeignKey("balance_transactions.id"))
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+
+
+class WebhookEndpoint(Base):
+    __tablename__ = "webhook_endpoints"
+    __table_args__ = (
+        Index("ix_webhook_endpoints_merchant_seq", "merchant_id", "seq"),
+        CheckConstraint("status IN ('enabled', 'disabled')", name="webhook_endpoints_status"),
+    )
+    object_name = "webhook endpoint"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
+    url: Mapped[str] = mapped_column(Text)
+    enabled_events: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    description: Mapped[str | None] = mapped_column(Text)
+    secret: Mapped[str] = mapped_column(Text)  # stored plain: needed to sign (design §5.12)
+    status: Mapped[str] = mapped_column(Text, default="enabled")
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+    __table_args__ = (
+        UniqueConstraint("event_id", "endpoint_id", name="uq_webhook_deliveries_event_endpoint"),
+        Index("ix_webhook_deliveries_due", "status", "next_attempt_at"),
+        CheckConstraint(
+            "status IN ('pending', 'succeeded', 'failed')", name="webhook_deliveries_status"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
+    event_id: Mapped[str] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
+    endpoint_id: Mapped[str] = mapped_column(
+        ForeignKey("webhook_endpoints.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(Text, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claim_id: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: clock.now()
+    )
