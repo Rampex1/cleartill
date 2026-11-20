@@ -15,6 +15,7 @@ _saved_database_url = None
 
 
 def pytest_configure(config):
+    os.environ.setdefault("SECRET_KEY", "test-secret")
     # Start Postgres before collection: app.db reads DATABASE_URL at import time, so test
     # modules may then `from app.main import app` at the top level.
     global _saved_database_url
