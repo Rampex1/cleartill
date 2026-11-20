@@ -7,11 +7,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app import errors
+from app import config, errors
 from app.db import get_db
 from app.routers import balance, customers, dashboard, events, payment_methods
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
+config.secret_key()  # refuse to start without a strong SECRET_KEY
 
 app = FastAPI(title="Cleartill")
 errors.install(app)

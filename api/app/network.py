@@ -33,6 +33,8 @@ def authorize(
 ) -> Approved | Declined | RequiresAuth:
     if sim_outcome in _DECLINES:
         return _DECLINES[sim_outcome]
-    if sim_outcome == "requires_3ds" and not three_ds_passed:
-        return RequiresAuth()
-    return Approved()
+    if sim_outcome == "requires_3ds":
+        return Approved() if three_ds_passed else RequiresAuth()
+    if sim_outcome == "success":
+        return Approved()
+    raise ValueError(f"unknown simulated outcome {sim_outcome!r}")
