@@ -13,6 +13,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "cleartill",
     "playwright>=1.65.2",
     "pytest>=9.2",
     "ruff>=0.17.6",
@@ -31,3 +32,6 @@ known-third-party = ["alembic"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.uv.sources]
+cleartill = { path = "../sdk", editable = true }

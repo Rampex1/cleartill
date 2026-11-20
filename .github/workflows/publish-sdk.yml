@@ -1,0 +1,26 @@
+name: publish-sdk
+# Pushing a tag like sdk-v0.1.0 publishes the SDK to TestPyPI through Trusted Publishing
+# (OIDC, no stored token). One-time setup on test.pypi.org: add a pending publisher for
+# project "cleartill", this repository, workflow "publish-sdk.yml", environment "testpypi".
+on:
+  push:
+    tags: ["sdk-v*"]
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.22"
+      - run: uv build
+        working-directory: sdk
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: sdk/dist/

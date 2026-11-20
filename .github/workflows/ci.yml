@@ -43,3 +43,38 @@ jobs:
         working-directory: api
       - run: uv run pytest -q tests/e2e tests/test_frontend.py
         working-directory: api
+  sdk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q
+      - run: uv build
+  openapi:
+    # The spec must generate a client (design §5.14); the generated code is discarded.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    env:
+      DATABASE_URL: postgresql://unused:unused@localhost:5432/unused
+      SECRET_KEY: ci-only-openapi-check-0123456789abcdef
+      PUBLIC_BASE_URL: https://example.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run python -c "import json; from app.main import app; print(json.dumps(app.openapi()))" > /tmp/openapi.json
+      - run: uvx openapi-python-client generate --path /tmp/openapi.json --output-path /tmp/generated --overwrite
