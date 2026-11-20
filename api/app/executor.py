@@ -105,12 +105,14 @@ def _claim(db: Session, merchant_id: str, key: str, req_hash: str):
 def execute(
     db: Session,
     request: Request,
-    merchant_id: str,
+    merchant_id: str | None,
     params: dict,
     handler: Callable[[], dict | Result],
 ) -> JSONResponse:
     # Stripe: keys apply to POST only; GET and DELETE ignore them.
-    key = request.headers.get("idempotency-key") if request.method == "POST" else None
+    # Keys are stored per merchant, so unauthenticated calls (signup, login) take none.
+    use_key = request.method == "POST" and merchant_id is not None
+    key = request.headers.get("idempotency-key") if use_key else None
     headers = {}
     # A savepoint per request: on any exception only this request's writes (and its key) are
     # undone, and the enclosing transaction (auth's read; in tests, the test's own data) stays

@@ -72,3 +72,12 @@ class IdempotencyKey(Base):
     response_status: Mapped[int | None] = mapped_column(Integer)
     response_body: Mapped[dict | None] = mapped_column(JSONB)
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+
+
+class DashboardSession(Base):
+    __tablename__ = "dashboard_sessions"
+
+    token_hash: Mapped[str] = mapped_column(Text, primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"), index=True)
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

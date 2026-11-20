@@ -11,12 +11,52 @@ from app.db import get_db
 from app.errors import ApiError
 from app.merchants import hash_key
 from app.models import ApiKey, Merchant
+from app.sessions import COOKIE_NAME, merchant_for_token
+
+CSRF_HEADER = "x-cleartill-dashboard"
+SAFE_METHODS = {"GET", "HEAD"}
 
 
 @dataclass
 class AuthContext:
     merchant: Merchant
     kind: str  # "secret" | "publishable"
+    via: str = "api_key"  # "api_key" | "session"
+
+
+def check_csrf(request: Request) -> None:
+    """Cookie-authenticated writes must carry a header a cross-site form can't set."""
+    if request.method not in SAFE_METHODS and request.headers.get(CSRF_HEADER) != "1":
+        raise ApiError(
+            403,
+            "invalid_request_error",
+            "Dashboard requests must send the header X-Cleartill-Dashboard: 1.",
+            code="permission_denied",
+        )
+
+
+def _session_context(request: Request, db: Session) -> AuthContext | None:
+    merchant = merchant_for_token(db, request.cookies.get(COOKIE_NAME))
+    if merchant is None:
+        return None
+    check_csrf(request)
+    request.state.merchant_id = merchant.id
+    return AuthContext(merchant=merchant, kind="secret", via="session")
+
+
+def require_session(request: Request, db: Annotated[Session, Depends(get_db)]) -> AuthContext:
+    """Dashboard-only endpoints: the session cookie, never an API key."""
+    ctx = _session_context(request, db)
+    if ctx is None:
+        raise ApiError(
+            401, "invalid_request_error", "You are not logged in.", code="not_authenticated"
+        )
+    return ctx
+
+
+def require_dashboard_header(request: Request) -> None:
+    """For signup/login, which have no session yet (blocks login CSRF)."""
+    check_csrf(request)
 
 
 def _invalid(message: str = "Invalid API key provided.") -> ApiError:
@@ -53,7 +93,12 @@ def _key_from_header(header: str | None) -> str:
 
 
 def authenticate(request: Request, db: Annotated[Session, Depends(get_db)]) -> AuthContext:
-    key = _key_from_header(request.headers.get("authorization"))
+    header = request.headers.get("authorization")
+    if header is None:  # an Authorization header always wins over the cookie
+        ctx = _session_context(request, db)
+        if ctx is not None:
+            return ctx
+    key = _key_from_header(header)
     row = db.execute(
         select(ApiKey.kind, Merchant)
         .join(Merchant, Merchant.id == ApiKey.merchant_id)
