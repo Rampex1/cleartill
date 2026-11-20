@@ -36,6 +36,7 @@ ALLOWED_FROM: dict[str, set[str]] = {
     "update": {"requires_payment_method", "requires_confirmation"},
     "confirm": {"requires_payment_method", "requires_confirmation", "requires_action"},
     "capture": {"requires_capture"},
+    "three_ds": {"requires_action"},
     "cancel": {
         "requires_payment_method",
         "requires_confirmation",
@@ -196,6 +197,7 @@ def decline(
     *,
     charge_code: str,
     error_code: str | None = None,
+    error_type: str = "card_error",
     decline_code: str | None = None,
     message: str | None = None,
 ) -> Result:
@@ -205,7 +207,7 @@ def decline(
     charge = _new_charge(
         db, pi, pm, status="failed", failure_code=charge_code, failure_message=message
     )
-    error = {"type": "card_error", "code": error_code or charge_code, "message": message}
+    error = {"type": error_type, "code": error_code or charge_code, "message": message}
     if decline_code:
         error["decline_code"] = decline_code
     pi.last_payment_error = {**error, "payment_method": cards.payment_method_json(pm)}
