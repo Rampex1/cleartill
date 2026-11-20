@@ -3,6 +3,7 @@ import unicodedata
 
 from sqlalchemy.orm import Session
 
+from app import ledger
 from app.ids import new_id, random_string
 from app.models import ApiKey, Merchant
 from app.passwords import hash_password
@@ -47,6 +48,7 @@ def create_merchant(
     )
     db.add(merchant)
     db.flush()
+    ledger.create_merchant_accounts(db, merchant.id)
     _, secret_key = new_api_key(db, merchant.id, "secret")
     _, publishable_key = new_api_key(db, merchant.id, "publishable")
     db.flush()
