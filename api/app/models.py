@@ -201,3 +201,53 @@ class PaymentMethod(Base):
     fingerprint: Mapped[str] = mapped_column(Text)
     sim_outcome: Mapped[str] = mapped_column(Text)
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+
+
+PI_STATUSES = (
+    "requires_payment_method",
+    "requires_confirmation",
+    "requires_action",
+    "processing",
+    "requires_capture",
+    "canceled",
+    "succeeded",
+)
+
+
+class PaymentIntent(Base):
+    __tablename__ = "payment_intents"
+    __table_args__ = (
+        Index("ix_payment_intents_merchant_seq", "merchant_id", "seq"),
+        CheckConstraint(
+            "status IN ('requires_payment_method', 'requires_confirmation', 'requires_action', "
+            "'processing', 'requires_capture', 'canceled', 'succeeded')",
+            name="payment_intents_status",
+        ),
+        CheckConstraint(
+            "capture_method IN ('automatic', 'automatic_async', 'manual')",
+            name="payment_intents_capture_method",
+        ),
+    )
+    object_name = "payment intent"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
+    amount: Mapped[int] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    capture_method: Mapped[str] = mapped_column(Text)
+    amount_capturable: Mapped[int] = mapped_column(BigInteger, default=0)
+    amount_received: Mapped[int] = mapped_column(BigInteger, default=0)
+    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"))
+    payment_method_id: Mapped[str | None] = mapped_column(ForeignKey("payment_methods.id"))
+    latest_charge_id: Mapped[str | None] = mapped_column(Text)  # FK added with charges (M9b)
+    client_secret: Mapped[str] = mapped_column(Text)
+    return_url: Mapped[str | None] = mapped_column(Text)
+    last_payment_error: Mapped[dict | None] = mapped_column(JSONB)
+    next_action: Mapped[dict | None] = mapped_column(JSONB)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text)
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, default=dict, server_default=text("'{}'::jsonb")
+    )
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
