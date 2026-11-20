@@ -7,7 +7,9 @@ from app.models import Charge, PaymentMethod
 
 
 def capture_charge(db: Session, charge: Charge, amount: int) -> None:
-    """Post the captured amount to the ledger and mark the charge captured."""
+    """Post the captured amount to the ledger and mark the charge captured (once)."""
+    if charge.captured or charge.status != "succeeded" or not 1 <= amount <= charge.amount:
+        raise ValueError(f"charge {charge.id} can't be captured for {amount}")
     bt = ledger.post_capture(db, charge.merchant_id, charge.id, amount, charge.currency)
     charge.captured = True
     charge.amount_captured = amount

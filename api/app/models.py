@@ -142,7 +142,16 @@ class JournalEntry(Base):
 
 class BalanceTransaction(Base):
     __tablename__ = "balance_transactions"
-    __table_args__ = (Index("ix_balance_transactions_merchant_seq", "merchant_id", "seq"),)
+    __table_args__ = (
+        Index("ix_balance_transactions_merchant_seq", "merchant_id", "seq"),
+        # One capture posting per charge (M9b).
+        Index(
+            "ux_balance_transactions_one_capture",
+            "source_id",
+            unique=True,
+            postgresql_where=text("type = 'charge'"),
+        ),
+    )
     object_name = "balance transaction"
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -240,7 +249,9 @@ class PaymentIntent(Base):
     amount_received: Mapped[int] = mapped_column(BigInteger, default=0)
     customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"))
     payment_method_id: Mapped[str | None] = mapped_column(ForeignKey("payment_methods.id"))
-    latest_charge_id: Mapped[str | None] = mapped_column(Text)  # FK added with charges (M9b)
+    latest_charge_id: Mapped[str | None] = mapped_column(
+        ForeignKey("charges.id", use_alter=True, name="fk_payment_intents_latest_charge")
+    )
     client_secret: Mapped[str] = mapped_column(Text)
     return_url: Mapped[str | None] = mapped_column(Text)
     last_payment_error: Mapped[dict | None] = mapped_column(JSONB)
@@ -259,6 +270,13 @@ class Charge(Base):
     __table_args__ = (
         Index("ix_charges_merchant_seq", "merchant_id", "seq"),
         CheckConstraint("status IN ('succeeded', 'failed')", name="charges_status"),
+        # At most one successful charge per PaymentIntent.
+        Index(
+            "ux_charges_one_succeeded_per_pi",
+            "payment_intent_id",
+            unique=True,
+            postgresql_where=text("status = 'succeeded'"),
+        ),
         CheckConstraint(
             "amount_captured >= 0 AND amount_refunded >= 0 AND amount_refunded <= amount_captured",
             name="charges_amounts",

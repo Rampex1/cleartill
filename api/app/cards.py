@@ -103,3 +103,20 @@ def tokenize(number: str, exp_month: str, exp_year: str, cvc: str) -> Card:
         fingerprint=fingerprint(digits),
         sim_outcome=sim_outcome_for(digits),
     )
+
+
+def payment_method_json(pm) -> dict:
+    return {
+        "id": pm.id,
+        "object": "payment_method",
+        "type": "card",
+        "card": {
+            "brand": pm.brand,
+            "last4": pm.last4,
+            "exp_month": pm.exp_month,
+            "exp_year": pm.exp_year,
+            "fingerprint": pm.fingerprint,
+        },
+        "created": int(pm.created.timestamp()),
+        "livemode": False,
+    }

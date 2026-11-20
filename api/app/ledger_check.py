@@ -49,7 +49,9 @@ PROBLEM_QUERIES = {
     "charge's amount_captured doesn't match its capture balance transactions": """
         SELECT c.id, c.amount_captured, coalesce(sum(bt.amount), 0)
         FROM charges c
-        LEFT JOIN balance_transactions bt ON bt.source_id = c.id AND bt.type = 'charge'
+        LEFT JOIN balance_transactions bt
+          ON bt.source_id = c.id AND bt.type = 'charge'
+         AND bt.merchant_id = c.merchant_id AND bt.currency = c.currency
         GROUP BY c.id, c.amount_captured
         HAVING c.amount_captured <> coalesce(sum(bt.amount), 0)
     """,

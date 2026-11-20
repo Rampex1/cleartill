@@ -16,6 +16,7 @@ _saved_database_url = None
 
 def pytest_configure(config):
     os.environ.setdefault("SECRET_KEY", "test-secret-0123456789abcdef0123456789abcdef")
+    os.environ.setdefault("PUBLIC_BASE_URL", "https://testserver")
     # Ryuk (testcontainers' reaper) intermittently fails to start locally; pytest_unconfigure
     # already stops our one container.
     if not os.environ.get("CI"):
