@@ -1,4 +1,5 @@
 import hashlib
+import unicodedata
 
 from sqlalchemy.orm import Session
 
@@ -8,7 +9,7 @@ from app.passwords import hash_password
 
 
 def normalize_email(email: str) -> str:
-    return email.strip().lower()
+    return unicodedata.normalize("NFKC", email).strip().casefold()
 
 
 def hash_key(key: str) -> str:

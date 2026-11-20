@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, BeforeValidator, ConfigDict, StringConstraints
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import clock, forms, ratelimit
@@ -14,7 +15,7 @@ from app.errors import ApiError
 from app.executor import execute
 from app.merchants import create_merchant, new_api_key, normalize_email
 from app.models import ApiKey, Merchant
-from app.passwords import DUMMY_HASH, verify_password
+from app.passwords import DUMMY_HASH, hash_password, needs_rehash, verify_password
 from app.sessions import (
     COOKIE_NAME,
     clear_session_cookie,
@@ -48,6 +49,16 @@ class LoginParams(BaseModel):
     password: Annotated[str, StringConstraints(max_length=128)]
 
 
+def _account_exists() -> ApiError:
+    return ApiError(
+        400,
+        "invalid_request_error",
+        "An account with this email already exists.",
+        code="account_exists",
+        param="email",
+    )
+
+
 def merchant_json(m: Merchant) -> dict:
     return {"id": m.id, "email": m.email}
 
@@ -70,16 +81,13 @@ def signup(request: Request, db: Db, params: Params):
     def handler():
         data = forms.validate(SignupParams, params)
         if db.scalar(select(Merchant.id).where(Merchant.email == data.email)):
-            raise ApiError(
-                400,
-                "invalid_request_error",
-                "An account with this email already exists.",
-                code="account_exists",
-                param="email",
+            raise _account_exists()
+        try:
+            merchant, secret_key, publishable_key = create_merchant(
+                db, data.email, password=data.password
             )
-        merchant, secret_key, publishable_key = create_merchant(
-            db, data.email, password=data.password
-        )
+        except IntegrityError:
+            raise _account_exists() from None  # a concurrent signup won the race
         session["token"] = create_session(db, merchant.id)
         return {
             "merchant": merchant_json(merchant),
@@ -110,6 +118,11 @@ def login(request: Request, db: Db, params: Params):
                 "Invalid email or password.",
                 code="invalid_credentials",
             )
+        if needs_rehash(stored):
+            merchant.password_hash = hash_password(data.password)
+        old_token = request.cookies.get(COOKIE_NAME)
+        if old_token:
+            delete_session(db, old_token)  # replace, don't accumulate, the presented session
         session["token"] = create_session(db, merchant.id)  # always new: no fixation
         return {"merchant": merchant_json(merchant)}
 
@@ -118,13 +131,19 @@ def login(request: Request, db: Db, params: Params):
     return response
 
 
-@router.post("/logout")
-def logout(request: Request, auth: SessionAuth, db: Db, params: Params):
+@router.post("/logout", dependencies=DashboardHeader)
+def logout(request: Request, db: Db, params: Params):
+    """Idempotent: always clears the cookie, even if the session already expired."""
+
     def handler():
-        delete_session(db, request.cookies[COOKIE_NAME])
+        forms.validate(forms.NoParams, params)
+        token = request.cookies.get(COOKIE_NAME)
+        if token:
+            delete_session(db, token)
         return {"logged_out": True}
 
-    response = execute(db, request, auth.merchant.id, params, handler)
+    # merchant_id=None: no Idempotency-Key storage (nothing to replay; keys are per merchant).
+    response = execute(db, request, None, params, handler)
     clear_session_cookie(response)
     return response
 
@@ -147,6 +166,7 @@ def list_keys(auth: SessionAuth, db: Db):
 @router.post("/keys/{key_id}/roll")
 def roll_key(key_id: str, request: Request, auth: SessionAuth, db: Db, params: Params):
     def handler():
+        forms.validate(forms.NoParams, params)
         old = db.scalar(
             select(ApiKey)
             .where(
@@ -166,4 +186,6 @@ def roll_key(key_id: str, request: Request, auth: SessionAuth, db: Db, params: P
         db.flush()
         return {**key_json(new), "secret": secret}
 
-    return execute(db, request, auth.merchant.id, params, handler)
+    # merchant_id=None: never store this response for idempotent replay — it holds a live
+    # secret key. A double-submitted roll is safe anyway: the old key is already revoked (404).
+    return execute(db, request, None, params, handler)
