@@ -69,3 +69,4 @@ th { color: var(--muted); font-weight: 500; }
 .refund { align-items: end; margin-top: 16px; max-width: 420px; }
 .notice { background: #ecfdf5; border: 1px solid #a7f3d0; padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; word-break: break-all; }
 .attempts { margin: 0; padding-left: 18px; font-size: 14px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

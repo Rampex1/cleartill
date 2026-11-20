@@ -1,5 +1,6 @@
 """Dashboard-only endpoints: signup, login, logout, session, API keys."""
 
+import threading
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
@@ -264,15 +265,44 @@ def list_attempts(delivery_id: str, auth: SessionAuth, db: Db):
     return {"object": "list", "data": [attempt_json(a) for a in attempts]}
 
 
+# ponytail: per-process cap on concurrent synchronous resends (each holds a worker thread for
+# up to ~20 s against a merchant-chosen URL); move resends to the worker queue if it bites.
+RESEND_SLOTS = threading.BoundedSemaphore(4)
+RESENDS_PER_MINUTE = 10
+
+
+def _busy() -> ApiError:
+    return ApiError(
+        429,
+        "invalid_request_error",
+        "Too many resends right now. Try again in a moment.",
+        code="rate_limit",
+    )
+
+
 @router.post("/webhook_deliveries/{delivery_id}/resend")
 def resend_delivery(delivery_id: str, auth: SessionAuth, db: Db):
     """Send now and record a manual attempt. Not run through the executor: the HTTP call
     must happen outside any transaction (claim commits, send, then a fenced finish)."""
-    claimed = delivery.claim_manual(db, auth.merchant.id, delivery_id)
-    result = delivery.send(claimed.url, claimed.payload, delivery.signed_headers(claimed))
-    delivery.finish(db, claimed, result, manual=True)
+    ratelimit.check("resend", auth.merchant.id, limit=RESENDS_PER_MINUTE)
+    if not RESEND_SLOTS.acquire(blocking=False):
+        raise _busy()
+    try:
+        claimed = delivery.claim_manual(db, auth.merchant.id, delivery_id)
+        result = delivery.send(claimed.url, claimed.payload, delivery.signed_headers(claimed))
+    finally:
+        RESEND_SLOTS.release()
+    if not delivery.finish(db, claimed, result, manual=True):
+        # The claim went stale mid-send (never with today's lock vs. send deadline): the send
+        # happened but wasn't recorded, so don't report some older attempt as this one.
+        raise ApiError(
+            409,
+            "invalid_request_error",
+            "The resend's result couldn't be recorded. Reload to see the delivery's state.",
+            code="delivery_in_progress",
+        )
     d = get_owned(db, WebhookDelivery, delivery_id, auth.merchant.id)
-    attempt = db.scalars(
+    attempt = db.scalars(  # ours: we held the claim until finish, so it's the newest manual one
         select(WebhookAttempt)
         .where(WebhookAttempt.delivery_id == d.id, WebhookAttempt.manual.is_(True))
         .order_by(WebhookAttempt.at.desc(), WebhookAttempt.id.desc())
@@ -280,5 +310,5 @@ def resend_delivery(delivery_id: str, auth: SessionAuth, db: Db):
     ).first()
     return {
         "delivery": delivery_json(d, _event_type(db, d.event_id)),
-        "attempt": attempt_json(attempt) if attempt else None,
+        "attempt": attempt_json(attempt),
     }

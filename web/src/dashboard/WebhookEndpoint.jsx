@@ -38,17 +38,36 @@ export default function WebhookEndpoint() {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);
 
-  const load = useCallback(async () => {
-    const e = await dashGet(`/v1/webhook_endpoints/${encodeURIComponent(id)}`);
-    if (e.status === 200) setEndpoint(e.body);
-    const res = await dashGet(`/dashboard-api/webhook_endpoints/${encodeURIComponent(id)}/deliveries`);
-    if (res.status === 200) setDeliveries(res.body.data);
-    else setError(errorMessage(res));
-  }, [id]);
+  // `isStale` lets a load started for a previous endpoint (or a closed page) drop its result.
+  const load = useCallback(
+    async (isStale = () => false) => {
+      const e = await dashGet(`/v1/webhook_endpoints/${encodeURIComponent(id)}`);
+      const res = await dashGet(
+        `/dashboard-api/webhook_endpoints/${encodeURIComponent(id)}/deliveries`,
+      );
+      if (isStale()) return;
+      // A deleted endpoint 404s on /v1 but keeps its delivery log; it can't be resent to.
+      setEndpoint(e.status === 200 ? e.body : { deleted: true });
+      if (res.status === 200) setDeliveries(res.body.data);
+      else setError(errorMessage(res));
+    },
+    [id],
+  );
 
   useEffect(() => {
-    load();
+    let stale = false;
+    setEndpoint(null);
+    setDeliveries(null);
+    setOpen(null);
+    setNotice(null);
+    setError(null);
+    load(() => stale);
+    return () => {
+      stale = true;
+    };
   }, [load]);
+
+  const canResend = endpoint && !endpoint.deleted && endpoint.status === "enabled";
 
   async function resend(delivery) {
     setBusy(delivery.id);
@@ -60,7 +79,10 @@ export default function WebhookEndpoint() {
     );
     if (res.status === 200) {
       const a = res.body.attempt;
-      setNotice(a?.status_code ? `Resent: ${a.status_code}` : `Resent: failed (${a?.error})`);
+      const ok = a && a.status_code >= 200 && a.status_code < 300;
+      setNotice(
+        ok ? `Resent: ${a.status_code}` : `Resent: failed (${a?.status_code ?? a?.error ?? "unknown"})`,
+      );
     } else setError(errorMessage(res));
     setOpen(null); // collapse, so a reopened attempts list is fresh
     await load();
@@ -73,10 +95,14 @@ export default function WebhookEndpoint() {
         <Link to="/dashboard/webhooks">← Webhooks</Link>
       </p>
       <h1>Webhook endpoint</h1>
-      {endpoint && (
+      {endpoint && !endpoint.deleted && (
         <p>
           <code>{endpoint.url}</code> ({endpoint.status})
         </p>
+      )}
+      {endpoint?.deleted && <p>This endpoint has been deleted; its delivery log is kept.</p>}
+      {endpoint && !endpoint.deleted && endpoint.status !== "enabled" && (
+        <p>This endpoint is disabled; enable it to resend.</p>
       )}
       {notice && (
         <p className="notice" role="status">
@@ -97,7 +123,9 @@ export default function WebhookEndpoint() {
               <th>Status</th>
               <th>Attempts</th>
               <th>Next attempt</th>
-              <th />
+              <th>
+                <span className="visually-hidden">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -112,17 +140,25 @@ export default function WebhookEndpoint() {
                     <button
                       type="button"
                       className="secondary"
+                      aria-expanded={open === d.id}
+                      aria-controls={`attempts-${d.id}`}
+                      aria-label={`Attempts for ${d.type} ${d.id}`}
                       onClick={() => setOpen(open === d.id ? null : d.id)}
                     >
                       Attempts
                     </button>
-                    <button type="button" disabled={busy !== null} onClick={() => resend(d)}>
+                    <button
+                      type="button"
+                      aria-label={`Resend ${d.type} ${d.id}`}
+                      disabled={busy !== null || !canResend}
+                      onClick={() => resend(d)}
+                    >
                       Resend
                     </button>
                   </td>
                 </tr>
                 {open === d.id && (
-                  <tr>
+                  <tr id={`attempts-${d.id}`}>
                     <td colSpan={5}>
                       <Attempts deliveryId={d.id} />
                     </td>
