@@ -1,7 +1,10 @@
 """PaymentIntent state machine (design §5.7). Every transition checks `ALLOWED_FROM` while
 holding the PI's row lock."""
 
+from datetime import timedelta
+
 from fastapi import Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import cards, clock, config, network
@@ -272,3 +275,48 @@ def confirm_pi(
     if isinstance(outcome, network.Approved):
         return approve(db, pi, pm, request)
     return decline(db, pi, pm, request, charge_code=outcome.code, decline_code=outcome.decline_code)
+
+
+AUTHORIZATION_LIFETIME = timedelta(days=7)  # online card holds expire after ~7 days
+
+
+def capture_pi(db: Session, pi: PaymentIntent, amount: int, request: Request | None) -> dict:
+    """Capture `amount` of an authorized PI (caller holds the PI lock). The uncaptured
+    remainder is released; amount_refunded is untouched (design §5.15)."""
+    require_status(pi, "capture")
+    charge = db.scalar(
+        select(Charge)
+        .where(Charge.id == pi.latest_charge_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    capture_charge(db, charge, amount)
+    pi.status = "succeeded"
+    pi.amount_received = amount
+    pi.amount_capturable = 0
+    db.flush()
+    emit(db, pi.merchant_id, "charge.captured", charge_json(db, charge), request)
+    body = pi_json(pi)
+    emit(db, pi.merchant_id, "payment_intent.succeeded", body, request)
+    return body
+
+
+def expire_authorizations(db: Session) -> int:
+    """Cancel uncaptured authorizations older than 7 days (run by the worker, M15).
+
+    ponytail: M17 must lock a checkout-owned PI's session first (lock order, design §5.2)."""
+    cutoff = clock.now() - AUTHORIZATION_LIFETIME
+    expired = db.scalars(
+        select(PaymentIntent)
+        .join(Charge, Charge.id == PaymentIntent.latest_charge_id)
+        .where(PaymentIntent.status == "requires_capture", Charge.authorized_at < cutoff)
+        .with_for_update(of=PaymentIntent, skip_locked=True)
+        .execution_options(populate_existing=True)
+    ).all()
+    for pi in expired:
+        pi.status = "canceled"
+        pi.cancellation_reason = "abandoned"
+        pi.amount_capturable = 0
+        db.flush()
+        emit(db, pi.merchant_id, "payment_intent.canceled", pi_json(pi))
+    return len(expired)
