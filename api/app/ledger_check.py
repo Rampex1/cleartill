@@ -46,6 +46,13 @@ PROBLEM_QUERIES = {
          AND bt.kind = acct.kind
         WHERE coalesce(acct.balance, 0) <> coalesce(bt.net, 0)
     """,
+    "charge's amount_captured doesn't match its capture balance transactions": """
+        SELECT c.id, c.amount_captured, coalesce(sum(bt.amount), 0)
+        FROM charges c
+        LEFT JOIN balance_transactions bt ON bt.source_id = c.id AND bt.type = 'charge'
+        GROUP BY c.id, c.amount_captured
+        HAVING c.amount_captured <> coalesce(sum(bt.amount), 0)
+    """,
     "platform fees don't match balance transaction fees": """
         WITH fees AS (
             SELECT a.currency, -coalesce(sum(e.amount), 0) AS booked

@@ -10,8 +10,14 @@ from app.auth import AuthContext, require_secret_key
 from app.db import get_db
 from app.events import emit
 from app.executor import execute
-from app.models import Customer, PaymentIntent, PaymentMethod
-from app.payment_intents import create_pi, pi_json, require_status
+from app.models import Customer, PaymentIntent
+from app.payment_intents import (
+    confirm_pi,
+    create_pi,
+    pi_json,
+    require_status,
+    resolve_payment_method,
+)
 from app.tenancy import get_owned, paginate
 from app.urls import validate_redirect_url
 
@@ -34,6 +40,7 @@ class CreateParams(BaseModel):
     capture_method: Literal["automatic", "automatic_async", "manual"] = "automatic_async"
     return_url: str | None = None
     metadata: forms.Metadata | None = None
+    confirm: bool = False
 
 
 class UpdateParams(BaseModel):
@@ -53,6 +60,13 @@ class CancelParams(BaseModel):
     ) = None
 
 
+class ConfirmParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    payment_method: str | None = None
+    return_url: str | None = None
+
+
 class ListParams(forms.ListParams):
     customer: str | None = None
 
@@ -64,9 +78,8 @@ def _customer_id(db: Session, merchant_id: str, value: str | None) -> str | None
 
 
 def _payment_method_id(db: Session, merchant_id: str, value: str | None) -> str | None:
-    if not value:
-        return None
-    return get_owned(db, PaymentMethod, value, merchant_id, param="payment_method").id
+    pm = resolve_payment_method(db, merchant_id, value)
+    return pm.id if pm else None
 
 
 @router.post("")
@@ -93,6 +106,8 @@ def create_payment_intent(request: Request, auth: Auth, db: Db, params: Params):
             metadata=forms.apply_metadata({}, data.metadata, clear=False),
             request=request,
         )
+        if data.confirm:
+            return confirm_pi(db, pi, request=request)
         return pi_json(pi)
 
     return execute(db, request, auth.merchant.id, params, handler)
@@ -123,6 +138,7 @@ def update_payment_intent(pi_id: str, request: Request, auth: Auth, db: Db, para
         merchant_id = auth.merchant.id
         pi = get_owned(db, PaymentIntent, pi_id, merchant_id, for_update=True)
         require_status(pi, "update")
+        pi.last_payment_error = None  # Stripe clears it on any update
         sent = data.model_fields_set
         if "amount" in sent:
             pi.amount = forms.require_amount(data.amount, minimum=MIN_PI_AMOUNT)
@@ -155,5 +171,20 @@ def cancel_payment_intent(pi_id: str, request: Request, auth: Auth, db: Db, para
         body = pi_json(pi)
         emit(db, auth.merchant.id, "payment_intent.canceled", body, request)
         return body
+
+    return execute(db, request, auth.merchant.id, params, handler)
+
+
+@router.post("/{pi_id}/confirm")
+def confirm_payment_intent(pi_id: str, request: Request, auth: Auth, db: Db, params: Params):
+    def handler():
+        data = forms.validate(ConfirmParams, params)
+        merchant_id = auth.merchant.id
+        pi = get_owned(db, PaymentIntent, pi_id, merchant_id, for_update=True)
+        return_url = (
+            validate_redirect_url(data.return_url, "return_url") if data.return_url else None
+        )
+        pm = resolve_payment_method(db, merchant_id, data.payment_method)
+        return confirm_pi(db, pi, payment_method=pm, return_url=return_url, request=request)
 
     return execute(db, request, auth.merchant.id, params, handler)

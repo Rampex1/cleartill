@@ -252,3 +252,35 @@ class PaymentIntent(Base):
         "metadata", JSONB, default=dict, server_default=text("'{}'::jsonb")
     )
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+
+
+class Charge(Base):
+    __tablename__ = "charges"
+    __table_args__ = (
+        Index("ix_charges_merchant_seq", "merchant_id", "seq"),
+        CheckConstraint("status IN ('succeeded', 'failed')", name="charges_status"),
+        CheckConstraint(
+            "amount_captured >= 0 AND amount_refunded >= 0 AND amount_refunded <= amount_captured",
+            name="charges_amounts",
+        ),
+    )
+    object_name = "charge"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
+    payment_intent_id: Mapped[str] = mapped_column(ForeignKey("payment_intents.id"), index=True)
+    payment_method_id: Mapped[str] = mapped_column(ForeignKey("payment_methods.id"))
+    amount: Mapped[int] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(Text)
+    amount_captured: Mapped[int] = mapped_column(BigInteger, default=0)
+    amount_refunded: Mapped[int] = mapped_column(BigInteger, default=0)
+    captured: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(Text)
+    failure_code: Mapped[str | None] = mapped_column(Text)
+    failure_message: Mapped[str | None] = mapped_column(Text)
+    authorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    balance_transaction_id: Mapped[str | None] = mapped_column(
+        ForeignKey("balance_transactions.id")
+    )
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())

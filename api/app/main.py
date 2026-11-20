@@ -11,6 +11,7 @@ from app import config, errors
 from app.db import get_db
 from app.routers import (
     balance,
+    charges,
     customers,
     dashboard,
     events,
@@ -29,6 +30,7 @@ app.include_router(balance.router)
 app.include_router(events.router)
 app.include_router(payment_methods.router)
 app.include_router(payment_intents.router)
+app.include_router(charges.router)
 
 
 @app.get("/healthz")
