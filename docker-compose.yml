@@ -13,7 +13,7 @@ services:
     build: ./api
     environment:
       DATABASE_URL: postgresql://cleartill:cleartill@db:5432/cleartill
-    command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"
     ports: ["8000:8000"]
     depends_on:
       db:
