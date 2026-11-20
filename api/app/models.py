@@ -357,7 +357,11 @@ class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
     __table_args__ = (
         UniqueConstraint("event_id", "endpoint_id", name="uq_webhook_deliveries_event_endpoint"),
-        Index("ix_webhook_deliveries_due", "status", "next_attempt_at"),
+        Index(
+            "ix_webhook_deliveries_due",
+            "next_attempt_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
         CheckConstraint(
             "status IN ('pending', 'succeeded', 'failed')", name="webhook_deliveries_status"
         ),
@@ -366,9 +370,8 @@ class WebhookDelivery(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
     event_id: Mapped[str] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
-    endpoint_id: Mapped[str] = mapped_column(
-        ForeignKey("webhook_endpoints.id", ondelete="CASCADE"), index=True
-    )
+    # No CASCADE: endpoints are soft-deleted and their delivery log stays.
+    endpoint_id: Mapped[str] = mapped_column(ForeignKey("webhook_endpoints.id"), index=True)
     status: Mapped[str] = mapped_column(Text, default="pending")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
