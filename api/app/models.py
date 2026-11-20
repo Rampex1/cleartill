@@ -380,3 +380,16 @@ class WebhookDelivery(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: clock.now()
     )
+
+
+class WebhookAttempt(Base):
+    __tablename__ = "webhook_attempts"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
+    delivery_id: Mapped[str] = mapped_column(ForeignKey("webhook_deliveries.id"), index=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status_code: Mapped[int | None] = mapped_column(Integer)
+    error: Mapped[str | None] = mapped_column(Text)
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    manual: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -178,6 +178,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
+    { name = "httpx2" },
     { name = "psycopg", extra = ["binary"] },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
@@ -185,7 +186,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx2" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "testcontainers" },
@@ -195,6 +195,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.20.1" },
     { name = "fastapi", specifier = ">=0.165" },
+    { name = "httpx2", specifier = ">=2.16.2" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.9" },
     { name = "sqlalchemy", specifier = ">=2.1.9" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54" },
@@ -202,7 +203,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx2", specifier = ">=2.16.2" },
     { name = "pytest", specifier = ">=9.2" },
     { name = "ruff", specifier = ">=0.17.6" },
     { name = "testcontainers", extras = ["postgres"], specifier = ">=4.15" },
