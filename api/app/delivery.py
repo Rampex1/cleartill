@@ -12,7 +12,7 @@ from datetime import timedelta
 from urllib.parse import urlsplit, urlunsplit
 
 import httpcore2
-from sqlalchemy import select, text, update
+from sqlalchemy import select, text, true, update
 from sqlalchemy.orm import Session
 
 from app import clock, urls, webhooks
@@ -21,6 +21,7 @@ from app.errors import ApiError
 from app.events import event_json, pending_counts
 from app.ids import new_id
 from app.models import Event, WebhookAttempt, WebhookDelivery, WebhookEndpoint
+from app.tenancy import get_owned
 
 log = logging.getLogger("cleartill.delivery")
 
@@ -109,6 +110,61 @@ def claim(db: Session) -> Claim | None:
         return None
     db.commit()
     return result
+
+
+_CLAIM_ONE = text(
+    """
+    UPDATE webhook_deliveries
+    SET locked_until = now() + make_interval(secs => :lock_seconds), claim_id = :claim_id
+    WHERE id = :id AND (locked_until IS NULL OR locked_until < now())
+    RETURNING id, event_id, endpoint_id
+    """
+)
+
+
+def claim_manual(db: Session, merchant_id: str, delivery_id: str) -> Claim:
+    """Claim one delivery for a dashboard resend (M20), fenced like the worker's claim, then
+    commit, so no lock is held during the send. 409 while another send holds the claim."""
+    delivery = get_owned(db, WebhookDelivery, delivery_id, merchant_id, for_update=True)
+    endpoint = db.get(WebhookEndpoint, delivery.endpoint_id)
+    if endpoint.deleted:
+        raise ApiError(
+            400,
+            "invalid_request_error",
+            "This delivery's webhook endpoint has been deleted.",
+            code="resource_missing",
+        )
+    claim_id = str(uuid.uuid4())
+    row = db.execute(
+        _CLAIM_ONE, {"id": delivery.id, "lock_seconds": LOCK_SECONDS, "claim_id": claim_id}
+    ).first()
+    if row is None:
+        db.rollback()
+        raise ApiError(
+            409,
+            "invalid_request_error",
+            "This delivery is being sent right now. Try again in a moment.",
+            code="delivery_in_progress",
+        )
+    event = db.get(Event, delivery.event_id)
+    body = event_json(event, pending_counts(db, [event.id]).get(event.id, 0))
+    db.commit()
+    return Claim(
+        delivery_id=delivery.id,
+        claim_id=claim_id,
+        url=endpoint.url,
+        secret=endpoint.secret,
+        payload=json.dumps(body, separators=(",", ":")),
+    )
+
+
+def signed_headers(claimed: Claim) -> dict:
+    timestamp = int(clock.now().timestamp())
+    return {
+        "Content-Type": "application/json",
+        "User-Agent": "Cleartill-Webhooks/1.0",
+        webhooks.SIGNATURE_HEADER: webhooks.sign(claimed.secret, timestamp, claimed.payload),
+    }
 
 
 class _DeadlineStream(httpcore2.NetworkStream):
@@ -245,7 +301,8 @@ def finish(db: Session, claimed: Claim, result: SendResult, *, manual: bool = Fa
         .where(
             WebhookDelivery.id == claimed.delivery_id,
             WebhookDelivery.claim_id == claimed.claim_id,
-            WebhookDelivery.status == "pending",
+            # A manual resend may target a succeeded or given-up delivery too.
+            true() if manual else WebhookDelivery.status == "pending",
         )
         .with_for_update()
         .execution_options(populate_existing=True)
@@ -286,13 +343,7 @@ def deliver_one(session_factory=SessionLocal) -> bool:
         claimed = claim(db)
         if claimed is None:
             return False
-        timestamp = int(clock.now().timestamp())
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "Cleartill-Webhooks/1.0",
-            webhooks.SIGNATURE_HEADER: webhooks.sign(claimed.secret, timestamp, claimed.payload),
-        }
-        result = send(claimed.url, claimed.payload, headers)
+        result = send(claimed.url, claimed.payload, signed_headers(claimed))
         if not finish(db, claimed, result):
             log.warning("stale webhook claim delivery=%s", claimed.delivery_id)
         return True

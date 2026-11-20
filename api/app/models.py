@@ -370,6 +370,7 @@ class WebhookDelivery(Base):
             "status IN ('pending', 'succeeded', 'failed')", name="webhook_deliveries_status"
         ),
     )
+    object_name = "webhook delivery"
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))

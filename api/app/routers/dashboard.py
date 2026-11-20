@@ -8,13 +8,20 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import clock, forms, ratelimit
+from app import clock, delivery, forms, ratelimit
 from app.auth import AuthContext, require_dashboard_header, require_session
 from app.db import get_db
 from app.errors import ApiError
 from app.executor import execute
 from app.merchants import create_merchant, new_api_key, normalize_email
-from app.models import ApiKey, Merchant
+from app.models import (
+    ApiKey,
+    Event,
+    Merchant,
+    WebhookAttempt,
+    WebhookDelivery,
+    WebhookEndpoint,
+)
 from app.passwords import DUMMY_HASH, hash_password, needs_rehash, verify_password
 from app.sessions import (
     COOKIE_NAME,
@@ -23,6 +30,7 @@ from app.sessions import (
     delete_session,
     set_session_cookie,
 )
+from app.tenancy import get_owned
 
 router = APIRouter(prefix="/dashboard-api")
 
@@ -189,3 +197,88 @@ def roll_key(key_id: str, request: Request, auth: SessionAuth, db: Db, params: P
     # merchant_id=None: never store this response for idempotent replay — it holds a live
     # secret key. A double-submitted roll is safe anyway: the old key is already revoked (404).
     return execute(db, request, None, params, handler)
+
+
+# --- webhooks (M20): delivery log and synchronous resend ------------------------------------
+
+DELIVERY_PAGE = 100  # ponytail: newest 100 per endpoint; paginate if anyone needs more
+
+
+def _unix(value) -> int | None:
+    return int(value.timestamp()) if value is not None else None
+
+
+def delivery_json(d: WebhookDelivery, event_type: str) -> dict:
+    return {
+        "id": d.id,
+        "object": "webhook_delivery",
+        "event": d.event_id,
+        "type": event_type,
+        "status": d.status,
+        "attempts": d.attempts,
+        "next_attempt_at": _unix(d.next_attempt_at),
+        "created": _unix(d.created_at),
+    }
+
+
+def attempt_json(a: WebhookAttempt) -> dict:
+    return {
+        "id": a.id,
+        "object": "webhook_attempt",
+        "at": _unix(a.at),
+        "status_code": a.status_code,
+        "error": a.error,
+        "duration_ms": a.duration_ms,
+        "manual": a.manual,
+    }
+
+
+def _event_type(db: Session, event_id: str) -> str:
+    return db.scalar(select(Event.type).where(Event.id == event_id))
+
+
+@router.get("/webhook_endpoints/{endpoint_id}/deliveries")
+def list_deliveries(endpoint_id: str, auth: SessionAuth, db: Db):
+    endpoint = get_owned(db, WebhookEndpoint, endpoint_id, auth.merchant.id, include_deleted=True)
+    rows = db.execute(
+        select(WebhookDelivery, Event.type)
+        .join(Event, Event.id == WebhookDelivery.event_id)
+        .where(
+            WebhookDelivery.endpoint_id == endpoint.id,
+            WebhookDelivery.merchant_id == auth.merchant.id,
+        )
+        .order_by(WebhookDelivery.created_at.desc(), WebhookDelivery.id.desc())
+        .limit(DELIVERY_PAGE)
+    ).all()
+    return {"object": "list", "data": [delivery_json(d, t) for d, t in rows]}
+
+
+@router.get("/webhook_deliveries/{delivery_id}/attempts")
+def list_attempts(delivery_id: str, auth: SessionAuth, db: Db):
+    d = get_owned(db, WebhookDelivery, delivery_id, auth.merchant.id)
+    attempts = db.scalars(
+        select(WebhookAttempt)
+        .where(WebhookAttempt.delivery_id == d.id, WebhookAttempt.merchant_id == auth.merchant.id)
+        .order_by(WebhookAttempt.at, WebhookAttempt.id)
+    )
+    return {"object": "list", "data": [attempt_json(a) for a in attempts]}
+
+
+@router.post("/webhook_deliveries/{delivery_id}/resend")
+def resend_delivery(delivery_id: str, auth: SessionAuth, db: Db):
+    """Send now and record a manual attempt. Not run through the executor: the HTTP call
+    must happen outside any transaction (claim commits, send, then a fenced finish)."""
+    claimed = delivery.claim_manual(db, auth.merchant.id, delivery_id)
+    result = delivery.send(claimed.url, claimed.payload, delivery.signed_headers(claimed))
+    delivery.finish(db, claimed, result, manual=True)
+    d = get_owned(db, WebhookDelivery, delivery_id, auth.merchant.id)
+    attempt = db.scalars(
+        select(WebhookAttempt)
+        .where(WebhookAttempt.delivery_id == d.id, WebhookAttempt.manual.is_(True))
+        .order_by(WebhookAttempt.at.desc(), WebhookAttempt.id.desc())
+        .limit(1)
+    ).first()
+    return {
+        "delivery": delivery_json(d, _event_type(db, d.event_id)),
+        "attempt": attempt_json(attempt) if attempt else None,
+    }
