@@ -17,6 +17,7 @@ from app.routers import (
     events,
     payment_intents,
     payment_methods,
+    refunds,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -32,6 +33,7 @@ app.include_router(events.router)
 app.include_router(payment_methods.router)
 app.include_router(payment_intents.router)
 app.include_router(charges.router)
+app.include_router(refunds.router)
 
 
 @app.get("/healthz")

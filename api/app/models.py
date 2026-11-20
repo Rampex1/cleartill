@@ -151,6 +151,13 @@ class BalanceTransaction(Base):
             unique=True,
             postgresql_where=text("type = 'charge'"),
         ),
+        # One refund posting per refund (M11).
+        Index(
+            "ux_balance_transactions_one_refund",
+            "source_id",
+            unique=True,
+            postgresql_where=text("type = 'refund'"),
+        ),
     )
     object_name = "balance transaction"
 
@@ -301,4 +308,26 @@ class Charge(Base):
     balance_transaction_id: Mapped[str | None] = mapped_column(
         ForeignKey("balance_transactions.id")
     )
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+
+
+class Refund(Base):
+    __tablename__ = "refunds"
+    __table_args__ = (
+        Index("ix_refunds_merchant_seq", "merchant_id", "seq"),
+        CheckConstraint("amount > 0", name="refunds_amount_positive"),
+        CheckConstraint("status IN ('succeeded')", name="refunds_status"),
+    )
+    object_name = "refund"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
+    charge_id: Mapped[str] = mapped_column(ForeignKey("charges.id"), index=True)
+    payment_intent_id: Mapped[str] = mapped_column(ForeignKey("payment_intents.id"), index=True)
+    amount: Mapped[int] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    balance_transaction_id: Mapped[str] = mapped_column(ForeignKey("balance_transactions.id"))
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
