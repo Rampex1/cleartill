@@ -47,6 +47,9 @@ class PermissionError(CleartillError):  # noqa: A001 (mirrors the API's error cl
     pass
 
 
+CleartillPermissionError = PermissionError  # for `import *` users: no builtin shadowing
+
+
 class RateLimitError(CleartillError):
     pass
 
@@ -77,7 +80,7 @@ def error_for(status: int, body: dict, request_id: str | None) -> CleartillError
         cls = PermissionError
     elif status == 429:
         cls = RateLimitError
-    elif status in (400, 404):
+    elif status in (400, 404) or (400 <= status < 500 and kind == "invalid_request_error"):
         cls = InvalidRequestError
     else:
         cls = APIError

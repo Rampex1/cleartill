@@ -5,7 +5,17 @@ description = "Python client for the Cleartill payments API (a Stripe-style lear
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Typing :: Typed",
+    "Intended Audience :: Developers",
+]
+
 dependencies = ["httpx2>=2.16"]
+
+[project.urls]
+Repository = "https://github.com/Rampex1/cleartill"
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]
@@ -20,3 +30,6 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.hatch.build.targets.sdist]
+include = ["cleartill", "README.md", "LICENSE"]
