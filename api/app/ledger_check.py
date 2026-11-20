@@ -58,7 +58,9 @@ PROBLEM_QUERIES = {
     "charge's amount_refunded doesn't match its refunds": """
         SELECT c.id, c.amount_refunded, coalesce(sum(r.amount), 0)
         FROM charges c
-        LEFT JOIN refunds r ON r.charge_id = c.id AND r.status = 'succeeded'
+        LEFT JOIN refunds r
+          ON r.charge_id = c.id AND r.status = 'succeeded'
+         AND r.merchant_id = c.merchant_id AND r.currency = c.currency
         GROUP BY c.id, c.amount_refunded
         HAVING c.amount_refunded <> coalesce(sum(r.amount), 0)
     """,
@@ -66,7 +68,7 @@ PROBLEM_QUERIES = {
         SELECT r.id, r.amount, bt.amount FROM refunds r
         LEFT JOIN balance_transactions bt
           ON bt.id = r.balance_transaction_id AND bt.source_id = r.id AND bt.type = 'refund'
-         AND bt.merchant_id = r.merchant_id
+         AND bt.merchant_id = r.merchant_id AND bt.currency = r.currency
         WHERE bt.id IS NULL OR bt.amount <> -r.amount
     """,
     "platform fees don't match balance transaction fees": """
