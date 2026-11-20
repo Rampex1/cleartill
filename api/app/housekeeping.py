@@ -13,8 +13,13 @@ from app.models import BalanceTransaction, DashboardSession
 log = logging.getLogger("cleartill.housekeeping")
 
 
-def release_due_funds(db: Session, limit: int = 500) -> int:
-    """Pending → available for charges whose available_on has passed."""
+# ponytail: one batch per minute (720k releases/day); loop batches if a backlog ever lags.
+RELEASE_BATCH = 500
+
+
+def release_due_funds(db: Session, limit: int = RELEASE_BATCH) -> int:
+    """Pending → available for charges whose available_on has passed. Each row is released in
+    its own savepoint, so one bad row is logged and skipped instead of blocking the batch."""
     due = db.scalars(
         select(BalanceTransaction)
         .where(
@@ -26,7 +31,14 @@ def release_due_funds(db: Session, limit: int = 500) -> int:
         .limit(limit)
         .with_for_update(skip_locked=True)
     ).all()
-    return sum(1 for bt in due if ledger.release(db, bt))
+    released = 0
+    for bt in due:
+        try:
+            with db.begin_nested():
+                released += ledger.release(db, bt)
+        except Exception:
+            log.exception("could not release balance transaction %s", bt.id)
+    return released
 
 
 def purge_dashboard_sessions(db: Session) -> int:

@@ -24,6 +24,7 @@ from app.routers import (
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 config.secret_key()  # refuse to start without a strong SECRET_KEY
 config.public_base_url()  # and without a usable PUBLIC_BASE_URL
+config.warn_if_insecure_urls(logging.getLogger("cleartill"))
 
 app = FastAPI(title="Cleartill")
 errors.install(app)

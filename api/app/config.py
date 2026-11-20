@@ -43,3 +43,8 @@ def public_base_url() -> str:
     if not parts.hostname or parts.scheme not in ({"https", "http"} if insecure_ok else {"https"}):
         raise RuntimeError("PUBLIC_BASE_URL must be set to an https URL (http only for localhost)")
     return value
+
+
+def warn_if_insecure_urls(log) -> None:
+    if os.environ.get("ALLOW_INSECURE_URLS") == "1":
+        log.warning("ALLOW_INSECURE_URLS=1: the webhook SSRF guard is OFF (local development only)")
