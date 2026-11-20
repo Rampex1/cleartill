@@ -161,3 +161,17 @@ class BalanceTransaction(Base):
         ForeignKey("journal_transactions.id")
     )
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+
+
+class Event(Base):
+    __tablename__ = "events"
+    __table_args__ = (Index("ix_events_merchant_seq", "merchant_id", "seq"),)
+    object_name = "event"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
+    type: Mapped[str] = mapped_column(Text)
+    data: Mapped[dict] = mapped_column(JSONB)  # {"object": <snapshot>}; never updated
+    request: Mapped[dict] = mapped_column(JSONB)  # {"id", "idempotency_key"}
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())

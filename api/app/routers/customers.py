@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app import forms
 from app.auth import AuthContext, require_secret_key
 from app.db import get_db
+from app.events import emit
 from app.executor import execute
 from app.ids import new_id
 from app.models import Customer
@@ -69,7 +70,9 @@ def create_customer(request: Request, auth: Auth, db: Db, params: Params):
         )
         db.add(customer)
         db.flush()
-        return customer_json(customer)
+        body = customer_json(customer)
+        emit(db, request, auth.merchant.id, "customer.created", body)
+        return body
 
     return execute(db, request, auth.merchant.id, params, handler)
 
@@ -109,7 +112,9 @@ def update_customer(customer_id: str, request: Request, auth: Auth, db: Db, para
                 customer.metadata_, data.metadata, clear_metadata
             )
         db.flush()
-        return customer_json(customer)
+        body = customer_json(customer)
+        emit(db, request, auth.merchant.id, "customer.updated", body)
+        return body
 
     return execute(db, request, auth.merchant.id, params, handler)
 
@@ -119,8 +124,10 @@ def delete_customer(customer_id: str, request: Request, auth: Auth, db: Db, para
     def handler():
         forms.validate(forms.NoParams, params)
         customer = get_owned(db, Customer, customer_id, auth.merchant.id, for_update=True)
+        snapshot = customer_json(customer)  # Stripe's customer.deleted carries the full object
         customer.deleted = True
         db.flush()
+        emit(db, request, auth.merchant.id, "customer.deleted", snapshot)
         return deleted_json(customer)
 
     return execute(db, request, auth.merchant.id, params, handler)
