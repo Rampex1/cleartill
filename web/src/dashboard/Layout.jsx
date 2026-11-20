@@ -51,6 +51,9 @@ export default function Layout() {
       <nav className="nav">
         <strong>Cleartill</strong>
         <NavLink to="/dashboard/payments">Payments</NavLink>
+        <NavLink to="/dashboard/customers">Customers</NavLink>
+        <NavLink to="/dashboard/balance">Balance</NavLink>
+        <NavLink to="/dashboard/webhooks">Webhooks</NavLink>
         <NavLink to="/dashboard/keys">API keys</NavLink>
         <span className="spacer">{merchant.email}</span>
         <button type="button" className="secondary" onClick={logout}>
