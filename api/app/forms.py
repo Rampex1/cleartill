@@ -10,7 +10,15 @@ from typing import Annotated
 from urllib.parse import parse_qsl
 
 from fastapi import Request
-from pydantic import BeforeValidator
+from fastapi.exceptions import RequestValidationError
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+)
 from pydantic_core import PydanticCustomError
 
 from app.errors import ApiError
@@ -110,3 +118,26 @@ async def params(request: Request) -> dict:
     except UnicodeDecodeError:
         raise ApiError(400, "invalid_request_error", "Request body is not valid UTF-8.") from None
     return parse_params(parse_qsl(text, keep_blank_values=True))
+
+
+def validate[M: BaseModel](model: type[M], params: dict) -> M:
+    """Validate client params. Failures become the standard 400; a Pydantic error raised
+    anywhere else is a server bug and surfaces as a 500."""
+    try:
+        return model.model_validate(params)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from None
+
+
+# Stripe limits: 50 keys, keys up to 40 chars (no brackets), values up to 500 chars.
+MetadataKey = Annotated[str, StringConstraints(min_length=1, max_length=40, pattern=r"^[^\[\]]+$")]
+MetadataValue = Annotated[str, StringConstraints(max_length=500)]
+Metadata = Annotated[dict[MetadataKey, MetadataValue], Field(max_length=50)]
+
+
+class ListParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    limit: int = Field(10, ge=1, le=100)
+    starting_after: str | None = None
+    ending_before: str | None = None
