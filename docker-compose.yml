@@ -20,6 +20,9 @@ services:
       ALLOW_INSECURE_URLS: "1"  # local dev only: webhooks may target the host machine
       AVAILABILITY_DELAY_SECONDS: "300"  # demo: captured funds become available after 5 minutes
     command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"
+    extra_hosts:
+      # The API resolves webhook URLs when they're created; Linux needs this name mapped.
+      - "host.docker.internal:host-gateway"
     ports: ["127.0.0.1:8000:8000"]  # dev only: never expose the insecure-URL setup to the LAN
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]

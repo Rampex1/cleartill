@@ -92,7 +92,9 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.8.22"
-      - run: docker compose up -d --build --wait
-      - run: uv run --with ./sdk scripts/smoke.py http://localhost:8000
+          enable-cache: true
+      - run: uvx ruff check --line-length 100 scripts && uvx ruff format --check --line-length 100 scripts
+      - run: docker compose up -d --build --wait --wait-timeout 300
+      - run: uv run scripts/smoke.py http://localhost:8000
       - if: failure()
         run: docker compose logs --tail 200
