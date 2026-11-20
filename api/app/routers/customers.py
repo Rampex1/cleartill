@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app import forms
 from app.auth import AuthContext, require_secret_key
+from app.customers import customer_json, deleted_json
 from app.db import get_db
 from app.events import emit
 from app.executor import execute
@@ -34,22 +35,6 @@ class CustomerParams(BaseModel):
 
 class ListCustomersParams(forms.ListParams):
     email: Email | None = None
-
-
-def customer_json(c: Customer) -> dict:
-    return {
-        "id": c.id,
-        "object": "customer",
-        "created": int(c.created.timestamp()),
-        "livemode": False,
-        "email": c.email,
-        "name": c.name,
-        "metadata": c.metadata_,
-    }
-
-
-def deleted_json(c: Customer) -> dict:
-    return {"id": c.id, "object": "customer", "deleted": True}
 
 
 def _parse(params: dict) -> tuple[CustomerParams, bool]:

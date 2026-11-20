@@ -129,6 +129,7 @@ def list_payment_intents(auth: Auth, db: Db, params: Params):
         stmt = stmt.where(PaymentIntent.customer_id == lp.customer)
     paths = expand.parse(lp.expand, expand.PAYMENT_INTENT_PATHS, on_list=True)
     page = paginate(db, stmt, PaymentIntent, auth.merchant.id, lp, "/v1/payment_intents")
+    cache = expand.preload_payment_intents(db, page["data"], paths, auth.merchant.id)  # noqa: F841
     page["data"] = [expand.expand_payment_intent(db, pi, pi_json(pi), paths) for pi in page["data"]]
     return page
 
