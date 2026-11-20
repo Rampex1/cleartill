@@ -21,7 +21,13 @@ class AuthContext:
 
 def _invalid(message: str = "Invalid API key provided.") -> ApiError:
     # Never echo the key back.
-    return ApiError(401, "invalid_request_error", message, code="api_key_invalid")
+    return ApiError(
+        401,
+        "invalid_request_error",
+        message,
+        code="api_key_invalid",
+        headers={"WWW-Authenticate": 'Basic realm="Cleartill"'},
+    )
 
 
 def _key_from_header(header: str | None) -> str:

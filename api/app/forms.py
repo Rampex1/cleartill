@@ -15,8 +15,18 @@ _KEY = re.compile(r"^([^\[\]]+)((?:\[[^\[\]]*\])*)$")
 _SEGMENT = re.compile(r"\[([^\[\]]*)\]")
 
 
+MAX_PARAM_ECHO = 100
+
+
 def _invalid(param: str, message: str) -> ApiError:
-    return ApiError(400, "invalid_request_error", message, code="parameter_invalid", param=param)
+    # Messages never contain the key or value; `param` is truncated.
+    return ApiError(
+        400,
+        "invalid_request_error",
+        message,
+        code="parameter_invalid",
+        param=param[:MAX_PARAM_ECHO],
+    )
 
 
 def parse_params(pairs: list[tuple[str, str]]) -> dict:
@@ -24,9 +34,11 @@ def parse_params(pairs: list[tuple[str, str]]) -> dict:
         raise _invalid(pairs[MAX_PAIRS][0], f"Too many parameters (max {MAX_PAIRS}).")
     root: dict = {}
     for key, value in pairs:
+        if "\x00" in key or "\x00" in value:
+            raise _invalid(key, "Parameters may not contain NUL characters.")
         match = _KEY.match(key)
         if not match:
-            raise _invalid(key, f"Malformed parameter name: {key}.")
+            raise _invalid(key, "Malformed parameter name.")
         path = [match.group(1), *_SEGMENT.findall(match.group(2))]
         if len(path) - 1 > MAX_DEPTH:
             raise _invalid(key, f"Parameters may be nested at most {MAX_DEPTH} levels deep.")
@@ -45,7 +57,7 @@ def _insert(root: dict, path: list[str], value: str, key: str) -> None:
             return
         if last:
             if segment in node:
-                raise _invalid(key, f"Parameter {key} was given more than once.")
+                raise _invalid(key, "Parameter was given more than once.")
             node[segment] = value
             return
         container = list if path[i + 1] == "" else dict
@@ -53,7 +65,7 @@ def _insert(root: dict, path: list[str], value: str, key: str) -> None:
         if child is None:
             child = node[segment] = container()
         elif not isinstance(child, container):
-            raise _invalid(key, f"Parameter {key} mixes incompatible forms.")
+            raise _invalid(key, "Parameter mixes incompatible forms (value, hash or array).")
         node = child
 
 
@@ -64,7 +76,7 @@ def _finalize(node, name: str):
     out = {k: _finalize(v, f"{name}[{k}]") for k, v in node.items()}
     if out and all(k.isdigit() for k in out):
         if set(out) != {str(i) for i in range(len(out))}:
-            raise _invalid(name, f"Indexes of {name} must be contiguous, starting at 0.")
+            raise _invalid(name, "Array indexes must be contiguous, starting at 0.")
         return [out[str(i)] for i in range(len(out))]
     return out
 
