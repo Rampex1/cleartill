@@ -79,6 +79,8 @@ def _claim(db: Session, merchant_id: str, key: str, req_hash: str):
                 .returning(IdempotencyKey.key)
             ).first()
         except OperationalError as exc:
+            # ponytail: assumes the only lock this insert can wait on is the key row. If a later
+            # path locks `merchants` FOR UPDATE (FK target), use FOR NO KEY UPDATE there.
             if getattr(exc.orig, "sqlstate", None) == LOCK_NOT_AVAILABLE:
                 raise _in_use() from None
             raise
@@ -113,7 +115,8 @@ def execute(
     # A savepoint per request: on any exception only this request's writes (and its key) are
     # undone, and the enclosing transaction (auth's read; in tests, the test's own data) stays
     # usable. On success the commit below makes everything durable at once.
-    with db.begin_nested():
+    savepoint = db.begin_nested()
+    with savepoint:
         db.execute(text("SELECT set_config('lock_timeout', :t, true)"), {"t": LOCK_TIMEOUT})
         stored = None
         if key is not None:
@@ -130,6 +133,9 @@ def execute(
             headers[REPLAY_HEADER] = "true"
         else:
             out = handler()
+            if not savepoint.is_active:
+                # A handler that commits would store a key without its response.
+                raise RuntimeError("handlers must not commit or roll back; the executor does")
             status, body = (out.status, out.body) if isinstance(out, Result) else (200, out)
             if key is not None:
                 db.execute(
@@ -137,12 +143,15 @@ def execute(
                     .where(IdempotencyKey.merchant_id == merchant_id, IdempotencyKey.key == key)
                     .values(response_status=status, response_body=body)
                 )
+    # Serialise before committing, so an unserialisable body can't 500 after a durable write.
+    response = JSONResponse(body, status_code=status, headers=headers)
     db.commit()  # the response is returned only after this succeeds
-    return JSONResponse(body, status_code=status, headers=headers)
+    return response
 
 
 def purge_idempotency_keys(db: Session, older_than: timedelta = timedelta(hours=24)) -> int:
-    """Delete keys older than `older_than` (Stripe keeps them at least 24h). Run by the worker."""
+    """Delete keys older than `older_than` (Stripe keeps them at least 24h). The caller
+    commits; run by the worker (M15). ponytail: one DELETE; batch it if the table grows."""
     result = db.execute(
         delete(IdempotencyKey).where(IdempotencyKey.created < clock.now() - older_than)
     )

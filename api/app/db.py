@@ -13,7 +13,9 @@ engine = create_engine(
     # Never put bind parameters (emails, secrets, card-derived data) into exception text.
     hide_parameters=True,
     pool_timeout=5,
-    connect_args={"connect_timeout": 5},
+    # lock_timeout for the whole connection, so lock waits outside the executor (e.g. in a
+    # dependency) can't hang forever; the executor also sets it per transaction.
+    connect_args={"connect_timeout": 5, "options": "-c lock_timeout=5s"},
 )
 SessionLocal = sessionmaker(engine)
 
