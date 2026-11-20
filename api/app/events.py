@@ -6,13 +6,35 @@ ponytail: `seq` follows insert order, which equals commit order only within one 
 sequence isn't worth it at demo scale."""
 
 from fastapi import Request
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app import clock
 from app.ids import new_id
-from app.models import Event
+from app.models import Event, WebhookDelivery, WebhookEndpoint
 
 API_VERSION = "2026-11-19"
+
+KNOWN_EVENT_TYPES = frozenset(
+    {
+        "customer.created",
+        "customer.updated",
+        "customer.deleted",
+        "payment_intent.created",
+        "payment_intent.succeeded",
+        "payment_intent.payment_failed",
+        "payment_intent.requires_action",
+        "payment_intent.amount_capturable_updated",
+        "payment_intent.canceled",
+        "charge.succeeded",
+        "charge.failed",
+        "charge.captured",
+        "charge.refunded",
+        "refund.created",
+        "checkout.session.completed",
+        "checkout.session.expired",
+    }
+)
 
 
 def emit(
@@ -38,11 +60,51 @@ def emit(
     )
     db.add(event)
     db.flush()  # each emit gets the next seq, so events keep their emission order
+    # The outbox: one pending delivery per matching endpoint, in this same transaction.
+    endpoint_ids = db.scalars(
+        select(WebhookEndpoint.id).where(
+            WebhookEndpoint.merchant_id == merchant_id,
+            WebhookEndpoint.status == "enabled",
+            WebhookEndpoint.deleted.is_(False),
+            or_(
+                WebhookEndpoint.enabled_events.contains([event_type]),
+                WebhookEndpoint.enabled_events.contains(["*"]),
+            ),
+        )
+    ).all()
+    now = clock.now()
+    for endpoint_id in endpoint_ids:
+        db.add(
+            WebhookDelivery(
+                id=new_id("wd_"),
+                merchant_id=merchant_id,
+                event_id=event.id,
+                endpoint_id=endpoint_id,
+                status="pending",
+                attempts=0,
+                next_attempt_at=now,
+                created_at=now,
+            )
+        )
+    if endpoint_ids:
+        db.flush()
     return event
 
 
+def pending_counts(db: Session, event_ids: list[str]) -> dict[str, int]:
+    """Undelivered webhook count per event, in one query (`pending_webhooks`)."""
+    if not event_ids:
+        return {}
+    rows = db.execute(
+        select(WebhookDelivery.event_id, func.count())
+        .where(WebhookDelivery.event_id.in_(event_ids), WebhookDelivery.status == "pending")
+        .group_by(WebhookDelivery.event_id)
+    ).all()
+    return dict(rows)
+
+
 def event_json(event: Event, pending_webhooks: int = 0) -> dict:
-    """`pending_webhooks` is passed in (M13 counts undelivered rows with one grouped query)."""
+    """`pending_webhooks` is passed in (see `pending_counts`)."""
     return {
         "id": event.id,
         "object": "event",
