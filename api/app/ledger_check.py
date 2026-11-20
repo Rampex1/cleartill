@@ -11,10 +11,20 @@ PROBLEM_QUERIES = {
     "entries don't sum to 0": """
         SELECT currency, sum(amount) FROM journal_entries GROUP BY currency HAVING sum(amount) <> 0
     """,
-    "journal transaction with fewer than 2 entries": """
-        SELECT t.id, count(e.id) FROM journal_transactions t
+    "journal transaction is single-legged, unbalanced or multi-currency": """
+        SELECT t.id, count(e.id), coalesce(sum(e.amount), 0), count(DISTINCT e.currency)
+        FROM journal_transactions t
         LEFT JOIN journal_entries e ON e.transaction_id = t.id
-        GROUP BY t.id HAVING count(e.id) < 2
+        GROUP BY t.id
+        HAVING count(e.id) < 2 OR coalesce(sum(e.amount), 0) <> 0
+            OR count(DISTINCT e.currency) > 1
+    """,
+    "entry currency differs from its account's": """
+        SELECT e.id, e.currency, a.currency FROM journal_entries e
+        JOIN ledger_accounts a ON a.id = e.account_id WHERE e.currency <> a.currency
+    """,
+    "balance transaction where amount - fee <> net": """
+        SELECT id, amount, fee, net FROM balance_transactions WHERE amount - fee <> net
     """,
     "merchant account doesn't match its balance transactions": """
         WITH acct AS (
@@ -60,9 +70,10 @@ def _run(conn) -> list[str]:
 def ledger_check(bind, own_txn: bool = True) -> list[str]:
     """Return a list of problems (empty = consistent).
 
-    own_txn=True: `bind` is an Engine; the checks run in one REPEATABLE READ READ ONLY
-    transaction, so a concurrent posting can't produce a false alarm. own_txn=False: `bind` is
-    the caller's Session/Connection (tests call it before rolling back)."""
+    own_txn=True: `bind` must be an Engine (not a Session); the checks run in one
+    REPEATABLE READ READ ONLY transaction, so a concurrent posting can't cause a false alarm.
+    own_txn=False: `bind` is the caller's Session/Connection (tests call it before rolling
+    back)."""
     if not own_txn:
         return _run(bind)
     with bind.connect() as conn:
