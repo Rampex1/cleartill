@@ -48,8 +48,10 @@ RESOLVE_TIMEOUT_SECONDS = 5
 RESOLVER_THREADS = 4
 _resolver_pool = ThreadPoolExecutor(max_workers=RESOLVER_THREADS, thread_name_prefix="resolve")
 # Never queue lookups: a merchant pointing at a DNS server that never answers must not starve
-# everyone else's validation. Busy means "try again" (the webhook sender, M14, has its own).
+# everyone else's validation. Busy means "try again". The webhook sender has its own pool.
 _resolver_slots = threading.BoundedSemaphore(RESOLVER_THREADS)
+_sender_pool = ThreadPoolExecutor(max_workers=RESOLVER_THREADS, thread_name_prefix="resolve-send")
+_sender_slots = threading.BoundedSemaphore(RESOLVER_THREADS)
 _NAT64 = ipaddress.IPv6Network("64:ff9b::/96")
 _IPV4_COMPATIBLE = ipaddress.IPv6Network("::/96")
 _NUMERIC_HOST = re.compile(r"[0-9a-fA-FxX.]+")
@@ -79,8 +81,9 @@ def _is_public(ip: str) -> bool:
     return all(c.is_global and not c.is_multicast for c in candidates)
 
 
-def _lookup(host: str, port: int, bad: ApiError) -> list[str]:
-    if not _resolver_slots.acquire(blocking=False):
+def _lookup(host: str, port: int, bad: ApiError, for_sender: bool = False) -> list[str]:
+    pool, slots = (_sender_pool, _sender_slots) if for_sender else (_resolver_pool, _resolver_slots)
+    if not slots.acquire(blocking=False):
         raise ApiError(
             400,
             "invalid_request_error",
@@ -90,17 +93,17 @@ def _lookup(host: str, port: int, bad: ApiError) -> list[str]:
         )
     future = None
     try:
-        future = _resolver_pool.submit(_resolve, host, port)
+        future = pool.submit(_resolve, host, port)
         return future.result(timeout=RESOLVE_TIMEOUT_SECONDS)
     except (OSError, FutureTimeout, UnicodeError):
         raise bad from None
     finally:
         if future is not None:
             future.cancel()
-        _resolver_slots.release()
+        slots.release()
 
 
-def validate_webhook_url(url: str) -> list[str]:
+def validate_webhook_url(url: str, *, for_sender: bool = False) -> list[str]:
     """SSRF guard for webhook endpoints (design §5.12). Returns the vetted IPs, which the
     sender pins to (M14). Rejects anything that isn't a public http(s) destination.
 
@@ -133,7 +136,7 @@ def validate_webhook_url(url: str) -> list[str]:
         if _NUMERIC_HOST.fullmatch(host) and any(ch.isdigit() for ch in host):
             # Octal/hex/short IPv4 spellings parse differently across resolvers: refuse them.
             raise bad from None
-        ips = _lookup(host, port, bad)
+        ips = _lookup(host, port, bad, for_sender)
     if os.environ.get("ALLOW_INSECURE_URLS") == "1":
         return ips  # local development only: private addresses allowed
     try:
