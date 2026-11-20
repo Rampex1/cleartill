@@ -1,4 +1,6 @@
+import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session
 
 
@@ -41,3 +43,10 @@ def test_commit_inside_test_stays_isolated(db, engine):
 
     with engine.connect() as other:
         assert other.execute(text("SELECT to_regclass('m1_probe')")).scalar() is None
+
+    # A rollback in code under test must only undo back to its savepoint: the outer test
+    # transaction (and the row committed above) must survive.
+    with pytest.raises(DataError):
+        db.execute(text("INSERT INTO m1_probe VALUES ('bad')"))
+    db.rollback()
+    assert db.execute(text("SELECT count(*) FROM m1_probe")).scalar() == 1
