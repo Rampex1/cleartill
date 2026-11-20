@@ -25,7 +25,12 @@ export default function Keys() {
     // A double click is still safe: the old key is revoked, so the second roll gets 404.
     const res = await dashPost(`/dashboard-api/keys/${encodeURIComponent(key.id)}/roll`);
     if (res.status === 200) setFresh(res.body);
-    else setError(errorMessage(res));
+    else if (res.status === 0) {
+      setError(
+        "Couldn't reach the server. The key may have been rolled: if its last 4 changed below, " +
+          "roll it again to see a new secret.",
+      );
+    } else setError(errorMessage(res));
     await load();
     setBusy(false);
   }

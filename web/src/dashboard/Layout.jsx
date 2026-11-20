@@ -1,25 +1,51 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
-import { dashGet, dashPost } from "./dash.js";
+import { dashGet, dashPost, errorMessage, onUnauthorized } from "./dash.js";
 
 export default function Layout() {
   const navigate = useNavigate();
   const [merchant, setMerchant] = useState(null);
+  const [error, setError] = useState(null);
+
+  const check = useCallback(async () => {
+    setError(null);
+    const res = await dashGet("/dashboard-api/session");
+    if (res.status === 200) setMerchant(res.body.merchant);
+    else if (res.status !== 401) setError(errorMessage(res)); // 401: onUnauthorized below
+  }, []);
 
   useEffect(() => {
-    dashGet("/dashboard-api/session").then(({ status, body }) => {
-      if (status === 200) setMerchant(body.merchant);
-      else navigate("/dashboard/login", { replace: true });
-    });
-  }, [navigate]);
+    const stop = onUnauthorized(() => navigate("/dashboard/login", { replace: true }));
+    check();
+    return stop;
+  }, [check, navigate]);
 
   async function logout() {
-    await dashPost("/dashboard-api/logout");
-    navigate("/dashboard/login", { replace: true });
+    const res = await dashPost("/dashboard-api/logout");
+    // Only the server can clear the HttpOnly cookie: don't look logged out unless it did.
+    if (res.status === 200) navigate("/dashboard/login", { replace: true });
+    else setError(`Logout failed. ${errorMessage(res)}`);
   }
 
-  if (!merchant) return <main className="wide"><p>Loading…</p></main>;
+  if (!merchant) {
+    return (
+      <main className="wide">
+        {error ? (
+          <>
+            <p className="error" role="alert">
+              {error}
+            </p>
+            <button type="button" onClick={check}>
+              Try again
+            </button>
+          </>
+        ) : (
+          <p>Loading…</p>
+        )}
+      </main>
+    );
+  }
   return (
     <div className="dash">
       <nav className="nav">
@@ -32,6 +58,11 @@ export default function Layout() {
         </button>
       </nav>
       <main className="wide">
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
         <Outlet />
       </main>
     </div>
