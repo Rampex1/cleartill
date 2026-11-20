@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app import checkout, clock, forms
 from app.auth import AuthContext, require_secret_key
 from app.db import get_db
+from app.errors import ApiError
 from app.executor import execute
 from app.ids import new_id
 from app.models import CheckoutSession, Customer
@@ -65,7 +66,14 @@ def create_session(request: Request, auth: Auth, db: Db, params: Params):
         merchant_id = auth.merchant.id
         items = []
         for item in data.line_items:
-            forms.require_amount(item.quantity, minimum=1, param="line_items")
+            if not 1 <= item.quantity <= 999_999:
+                raise ApiError(
+                    400,
+                    "invalid_request_error",
+                    "Each line item quantity must be between 1 and 999999.",
+                    code="parameter_invalid_integer",
+                    param="line_items",
+                )
             unit = forms.require_amount(item.price_data.unit_amount, minimum=0, param="line_items")
             items.append(
                 {
