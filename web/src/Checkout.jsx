@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
-import { getJson, money, postForm } from "./api.js";
+import { RETRY_MESSAGE, getJson, money, postForm } from "./api.js";
 
 const TEST_CARDS = [
   ["4242 4242 4242 4242", "succeeds"],
@@ -12,20 +12,37 @@ const TEST_CARDS = [
 export default function Checkout() {
   const { cs } = useParams();
   const [session, setSession] = useState(null);
-  const [missing, setMissing] = useState(false);
+  const [loadError, setLoadError] = useState(null); // "missing" | "retry"
   const [error, setError] = useState(null);
   const [paying, setPaying] = useState(false);
 
-  const load = useCallback(async () => {
-    const { status, body } = await getJson(`/checkout-api/sessions/${encodeURIComponent(cs)}`);
-    if (status !== 200) return setMissing(true);
-    if (body.status === "complete") return window.location.replace(body.success_url);
-    setSession(body);
-    if (body.last_payment_error) setError(body.last_payment_error.message);
-  }, [cs]);
+  // keepError: after a failed pay, keep that request's message rather than the stored one.
+  const load = useCallback(
+    async ({ keepError = false } = {}) => {
+      const { status, body } = await getJson(`/checkout-api/sessions/${encodeURIComponent(cs)}`);
+      if (status === 404) return setLoadError("missing");
+      if (status !== 200) return setLoadError("retry");
+      setLoadError(null);
+      // ponytail: a completed session's URL forwards to its success_url (design §5.10), so a
+      // merchant can use it as a redirector to its own https site. See M18 rulings.
+      if (body.status === "complete") return window.location.replace(body.success_url);
+      setSession(body);
+      if (!keepError) setError(body.last_payment_error?.message ?? null);
+    },
+    [cs],
+  );
 
   useEffect(() => {
     load();
+    // Back/forward cache restores a page mid-submit: reset it and refresh the session.
+    function onShow(event) {
+      if (event.persisted) {
+        setPaying(false);
+        load();
+      }
+    }
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
   }, [load]);
 
   async function pay(event) {
@@ -42,13 +59,30 @@ export default function Checkout() {
       fields,
     );
     if (status === 200 && body.redirect) return window.location.assign(body.redirect);
-    // 402: declined. 400/404: already paid, expired, or invalid input; reload to see which.
-    setError(body.error?.message ?? "Something went wrong. Please try again.");
+    // 402: declined (the session is unchanged). 400/404: already paid, expired or invalid
+    // input; reload the session to see which, keeping this message.
+    setError(body.error?.message ?? RETRY_MESSAGE);
     setPaying(false);
-    if (status !== 402) await load();
+    if (status === 400 || status === 404) await load({ keepError: true });
   }
 
-  if (missing) return <main className="page"><p>This checkout link is invalid.</p></main>;
+  if (loadError === "missing") {
+    return (
+      <main className="page">
+        <p>This checkout link is invalid.</p>
+      </main>
+    );
+  }
+  if (loadError === "retry") {
+    return (
+      <main className="page">
+        <p role="alert">Couldn't load checkout.</p>
+        <button type="button" onClick={() => load()}>
+          Try again
+        </button>
+      </main>
+    );
+  }
   if (!session) return <main className="page"><p>Loading…</p></main>;
   if (session.status === "expired") {
     return (
@@ -82,11 +116,11 @@ export default function Checkout() {
         <div className="row">
           <label>
             Expiry month
-            <input name="exp_month" inputMode="numeric" placeholder="MM" required />
+            <input name="exp_month" inputMode="numeric" placeholder="MM" autoComplete="off" required />
           </label>
           <label>
             Expiry year
-            <input name="exp_year" inputMode="numeric" placeholder="YYYY" required />
+            <input name="exp_year" inputMode="numeric" placeholder="YYYY" autoComplete="off" required />
           </label>
           <label>
             CVC

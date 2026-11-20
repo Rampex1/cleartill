@@ -6,7 +6,8 @@ context
 **/.pytest_cache
 **/.ruff_cache
 api/tests
-web/node_modules
+**/node_modules
 web/dist
 **/.env
 **/.env.*
+.github

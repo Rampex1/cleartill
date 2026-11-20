@@ -12,7 +12,9 @@ from urllib.parse import urlencode
 
 import pytest
 
-WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
+from app.frontend import WEB_DIST as _WEB_DIST  # noqa: E402  (what the app actually serves)
+
+WEB_DIST = Path(_WEB_DIST)
 if not (WEB_DIST / "index.html").exists():
     pytest.skip(
         f"SPA not built: {WEB_DIST / 'index.html'} is missing (run the web build)",
@@ -36,7 +38,7 @@ THREE_DS = "4000002760003184"
 BANNER = "Test mode: simulated payments, never enter a real card."
 CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; "
-    "frame-ancestors 'none'; form-action 'self'"
+    "frame-ancestors 'none'; form-action 'self'; base-uri 'none'"
 )
 
 
@@ -75,7 +77,10 @@ def base_url(engine):
 @pytest.fixture(scope="module")
 def browser():
     with sync_playwright() as p:
-        b = p.chromium.launch()
+        try:
+            b = p.chromium.launch()
+        except Exception as exc:  # browsers not installed: `uv run playwright install chromium`
+            pytest.skip(f"Chromium unavailable: {exc}".splitlines()[0])
         yield b
         b.close()
 
@@ -86,12 +91,15 @@ def page(browser, base_url):
     page = context.new_page()
     console = []
     page.on("console", lambda m: console.append(m.text))
-    page.route(
-        "https://merchant.test/**",
-        lambda route: route.fulfill(
+    page.merchant_referers = []
+
+    def merchant(route):
+        page.merchant_referers.append(route.request.headers.get("referer"))
+        route.fulfill(
             status=200, content_type="text/html", body="<html><body>merchant ok</body></html>"
-        ),
-    )
+        )
+
+    page.route("https://merchant.test/**", merchant)
     yield page
     context.close()
     bad = [m for m in console if "Content Security Policy" in m or "Refused to" in m]
@@ -194,9 +202,36 @@ def test_3ds_approve_completes_session(page, base_url, new_session):
     fill_and_pay(page, THREE_DS)
     page.wait_for_url(re.compile(re.escape(f"{base_url}/checkout/3ds/") + r".*client_secret="))
     expect(page.get_by_text(BANNER)).to_be_visible()
+    expect(page.get_by_role("button", name="Complete authentication")).to_be_visible()
+    assert "client_secret" not in page.url  # dropped from the address bar on load
     page.get_by_role("button", name="Complete authentication").click()
     page.wait_for_url(success_url(cs))
     assert session_status(skh, cs["id"]) == "complete"
+    assert page.merchant_referers == [None]  # Referrer-Policy: no-referrer
+
+
+def test_reloaded_3ds_page_is_a_clear_dead_end(page, base_url, new_session):
+    _, cs = new_session()
+    page.goto(cs["url"])
+    fill_and_pay(page, THREE_DS)
+    expect(page.get_by_role("button", name="Complete authentication")).to_be_visible()
+    page.reload()
+    expect(page.get_by_text("This authentication link has already been used")).to_be_visible()
+    expect(page.get_by_role("button", name="Complete authentication")).to_have_count(0)
+
+
+def test_unknown_session_shows_invalid_link(page, base_url):
+    page.goto(f"{base_url}/checkout/cs_doesnotexist")
+    expect(page.get_by_text("This checkout link is invalid.")).to_be_visible()
+
+
+def test_completed_session_url_forwards_to_success_url(page, base_url, new_session):
+    _, cs = new_session()
+    page.goto(cs["url"])
+    fill_and_pay(page, VISA)
+    page.wait_for_url(success_url(cs))
+    page.goto(cs["url"])
+    page.wait_for_url(success_url(cs))
 
 
 def test_3ds_fail_returns_to_checkout_with_alert_then_pays(page, base_url, new_session):
