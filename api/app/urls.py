@@ -2,6 +2,7 @@ import ipaddress
 import os
 import re
 import socket
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from urllib.parse import urlsplit
@@ -44,7 +45,14 @@ def validate_redirect_url(url: str, param: str) -> str:
 
 
 RESOLVE_TIMEOUT_SECONDS = 5
-_resolver_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="resolve")
+RESOLVER_THREADS = 4
+_resolver_pool = ThreadPoolExecutor(max_workers=RESOLVER_THREADS, thread_name_prefix="resolve")
+# Never queue lookups: a merchant pointing at a DNS server that never answers must not starve
+# everyone else's validation. Busy means "try again" (the webhook sender, M14, has its own).
+_resolver_slots = threading.BoundedSemaphore(RESOLVER_THREADS)
+_NAT64 = ipaddress.IPv6Network("64:ff9b::/96")
+_IPV4_COMPATIBLE = ipaddress.IPv6Network("::/96")
+_NUMERIC_HOST = re.compile(r"[0-9a-fA-FxX.]+")
 
 
 def _resolve(host: str, port: int) -> list[str]:
@@ -57,6 +65,8 @@ def _is_public(ip: str) -> bool:
     addr = ipaddress.ip_address(ip)
     candidates = [addr]
     if isinstance(addr, ipaddress.IPv6Address):
+        if addr in _IPV4_COMPATIBLE:
+            return False  # ::a.b.c.d is tunnelled to the IPv4 address on some hosts
         # Addresses that embed an IPv4 address must be checked as that address too.
         if addr.ipv4_mapped:
             candidates.append(addr.ipv4_mapped)
@@ -64,12 +74,37 @@ def _is_public(ip: str) -> bool:
             candidates.append(addr.sixtofour)
         if addr.teredo:
             candidates.extend(addr.teredo)
+        if addr in _NAT64:
+            candidates.append(ipaddress.IPv4Address(addr.packed[-4:]))
     return all(c.is_global and not c.is_multicast for c in candidates)
+
+
+def _lookup(host: str, port: int, bad: ApiError) -> list[str]:
+    if not _resolver_slots.acquire(blocking=False):
+        raise ApiError(
+            400,
+            "invalid_request_error",
+            "The webhook URL's host couldn't be checked right now; try again.",
+            code="url_invalid",
+            param="url",
+        )
+    future = None
+    try:
+        future = _resolver_pool.submit(_resolve, host, port)
+        return future.result(timeout=RESOLVE_TIMEOUT_SECONDS)
+    except (OSError, FutureTimeout, UnicodeError):
+        raise bad from None
+    finally:
+        if future is not None:
+            future.cancel()
+        _resolver_slots.release()
 
 
 def validate_webhook_url(url: str) -> list[str]:
     """SSRF guard for webhook endpoints (design §5.12). Returns the vetted IPs, which the
-    sender pins to (M14). Rejects anything that isn't a public http(s) destination."""
+    sender pins to (M14). Rejects anything that isn't a public http(s) destination.
+
+    Call it before opening the request transaction: a lookup can take 5 seconds."""
     bad = ApiError(
         400,
         "invalid_request_error",
@@ -88,19 +123,19 @@ def validate_webhook_url(url: str) -> list[str]:
         or parts.scheme not in ("http", "https")
         or not host
         or parts.username is not None
+        or port == 0
     ):
         raise bad
-    if os.environ.get("ALLOW_INSECURE_URLS") == "1":
-        return []  # local development only: private addresses allowed
     port = port or (443 if parts.scheme == "https" else 80)
     try:
         ips = [str(ipaddress.ip_address(host))]
     except ValueError:
-        try:
-            future = _resolver_pool.submit(_resolve, host, port)
-            ips = future.result(timeout=RESOLVE_TIMEOUT_SECONDS)
-        except (OSError, FutureTimeout, UnicodeError):
+        if _NUMERIC_HOST.fullmatch(host) and any(ch.isdigit() for ch in host):
+            # Octal/hex/short IPv4 spellings parse differently across resolvers: refuse them.
             raise bad from None
+        ips = _lookup(host, port, bad)
+    if os.environ.get("ALLOW_INSECURE_URLS") == "1":
+        return ips  # local development only: private addresses allowed
     try:
         if not ips or not all(_is_public(ip) for ip in ips):
             raise bad

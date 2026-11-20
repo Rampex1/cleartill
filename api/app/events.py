@@ -62,7 +62,8 @@ def emit(
     db.flush()  # each emit gets the next seq, so events keep their emission order
     # The outbox: one pending delivery per matching endpoint, in this same transaction.
     endpoint_ids = db.scalars(
-        select(WebhookEndpoint.id).where(
+        select(WebhookEndpoint.id)
+        .where(
             WebhookEndpoint.merchant_id == merchant_id,
             WebhookEndpoint.status == "enabled",
             WebhookEndpoint.deleted.is_(False),
@@ -71,6 +72,9 @@ def emit(
                 WebhookEndpoint.enabled_events.contains(["*"]),
             ),
         )
+        # FOR SHARE: a concurrent disable/delete either waits for this transaction (and then
+        # fails the new row) or commits first (and this select then skips the endpoint).
+        .with_for_update(read=True)
     ).all()
     now = clock.now()
     for endpoint_id in endpoint_ids:

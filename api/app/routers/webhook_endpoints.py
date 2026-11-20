@@ -77,11 +77,19 @@ def _fail_pending_deliveries(db: Session, endpoint_id: str) -> None:
     )
 
 
+def _prevalidate_url(params: dict) -> None:
+    """DNS can take seconds: check the URL before the transaction, key and row locks."""
+    url = params.get("url")
+    if isinstance(url, str):
+        validate_webhook_url(url)
+
+
 @router.post("")
 def create_endpoint(request: Request, auth: Auth, db: Db, params: Params):
+    _prevalidate_url(params)
+
     def handler():
         data = forms.validate(CreateParams, params)
-        validate_webhook_url(data.url)
         endpoint = WebhookEndpoint(
             id=new_id("we_"),
             merchant_id=auth.merchant.id,
@@ -115,13 +123,14 @@ def retrieve_endpoint(endpoint_id: str, auth: Auth, db: Db, params: Params):
 
 @router.post("/{endpoint_id}")
 def update_endpoint(endpoint_id: str, request: Request, auth: Auth, db: Db, params: Params):
+    _prevalidate_url(params)
+
     def handler():
         data = forms.validate(UpdateParams, params)
         endpoint = get_owned(db, WebhookEndpoint, endpoint_id, auth.merchant.id, for_update=True)
         sent = data.model_fields_set
         if "url" in sent and data.url is not None:
-            validate_webhook_url(data.url)
-            endpoint.url = data.url
+            endpoint.url = data.url  # validated before the transaction
         if "enabled_events" in sent and data.enabled_events is not None:
             endpoint.enabled_events = _check_events(data.enabled_events)
         if "description" in sent:
@@ -142,6 +151,7 @@ def delete_endpoint(endpoint_id: str, request: Request, auth: Auth, db: Db, para
         forms.validate(forms.NoParams, params)
         endpoint = get_owned(db, WebhookEndpoint, endpoint_id, auth.merchant.id, for_update=True)
         endpoint.deleted = True
+        endpoint.status = "disabled"  # the sender's claim only sends to enabled endpoints
         _fail_pending_deliveries(db, endpoint.id)
         db.flush()
         return {"id": endpoint.id, "object": "webhook_endpoint", "deleted": True}
