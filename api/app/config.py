@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import os
 from functools import cache
+from urllib.parse import urlsplit
 
 MIN_SECRET_LENGTH = 32
 
@@ -27,3 +28,18 @@ def subkey(purpose: str) -> bytes:
 
 def keyed_hash(purpose: str, message: str) -> str:
     return hmac.new(subkey(purpose), message.encode(), hashlib.sha256).hexdigest()
+
+
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "testserver"}
+
+
+@cache
+def public_base_url() -> str:
+    """Absolute base for URLs we hand out (next_action, checkout url). They can carry a
+    client_secret, so plain http is only allowed for local hosts."""
+    value = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+    parts = urlsplit(value)
+    insecure_ok = parts.hostname in LOCAL_HOSTS or os.environ.get("ALLOW_INSECURE_URLS") == "1"
+    if not parts.hostname or parts.scheme not in ({"https", "http"} if insecure_ok else {"https"}):
+        raise RuntimeError("PUBLIC_BASE_URL must be set to an https URL (http only for localhost)")
+    return value

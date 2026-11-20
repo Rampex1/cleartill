@@ -49,7 +49,30 @@ def upgrade() -> None:
     )
     op.create_index("ix_charges_merchant_seq", "charges", ["merchant_id", "seq"])
     op.create_index("ix_charges_payment_intent_id", "charges", ["payment_intent_id"])
+    op.create_index(
+        "ux_charges_one_succeeded_per_pi",
+        "charges",
+        ["payment_intent_id"],
+        unique=True,
+        postgresql_where=sa.text("status = 'succeeded'"),
+    )
+    op.create_index(
+        "ux_balance_transactions_one_capture",
+        "balance_transactions",
+        ["source_id"],
+        unique=True,
+        postgresql_where=sa.text("type = 'charge'"),
+    )
+    op.create_foreign_key(
+        "fk_payment_intents_latest_charge",
+        "payment_intents",
+        "charges",
+        ["latest_charge_id"],
+        ["id"],
+    )
 
 
 def downgrade() -> None:
+    op.drop_constraint("fk_payment_intents_latest_charge", "payment_intents", type_="foreignkey")
+    op.drop_index("ux_balance_transactions_one_capture", table_name="balance_transactions")
     op.drop_table("charges")

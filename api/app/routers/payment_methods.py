@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app import cards, forms
 from app.auth import AuthContext, require_publishable_key, require_secret_key
+from app.cards import payment_method_json
 from app.db import get_db
 from app.executor import execute
 from app.ids import new_id
@@ -34,23 +35,6 @@ class CreatePaymentMethodParams(BaseModel):
 
     type: Literal["card"]
     card: CardParams
-
-
-def payment_method_json(pm: PaymentMethod) -> dict:
-    return {
-        "id": pm.id,
-        "object": "payment_method",
-        "type": "card",
-        "card": {
-            "brand": pm.brand,
-            "last4": pm.last4,
-            "exp_month": pm.exp_month,
-            "exp_year": pm.exp_year,
-            "fingerprint": pm.fingerprint,
-        },
-        "created": int(pm.created.timestamp()),
-        "livemode": False,
-    }
 
 
 @router.post("")

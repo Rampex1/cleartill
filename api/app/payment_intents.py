@@ -1,12 +1,10 @@
 """PaymentIntent state machine (design §5.7). Every transition checks `ALLOWED_FROM` while
 holding the PI's row lock."""
 
-import os
-
 from fastapi import Request
 from sqlalchemy.orm import Session
 
-from app import cards, clock, network
+from app import cards, clock, config, network
 from app.charges import capture_charge, charge_json
 from app.errors import ApiError
 from app.events import emit
@@ -117,16 +115,6 @@ def pi_json(pi: PaymentIntent) -> dict:
     }
 
 
-def public_base_url() -> str:
-    return (os.environ.get("PUBLIC_BASE_URL") or "http://localhost:8000").rstrip("/")
-
-
-def payment_method_json(pm: PaymentMethod) -> dict:
-    from app.routers.payment_methods import payment_method_json as render
-
-    return render(pm)
-
-
 def resolve_payment_method(
     db: Session, merchant_id: str, value: str | None, param: str = "payment_method"
 ) -> PaymentMethod | None:
@@ -151,10 +139,82 @@ def resolve_payment_method(
     return pm
 
 
-def _decline_message(outcome: network.Declined) -> str:
-    if outcome.decline_code == "insufficient_funds":
+def _decline_message(code: str, decline_code: str | None) -> str:
+    if decline_code == "insufficient_funds":
         return INSUFFICIENT_FUNDS_MESSAGE
-    return DECLINE_MESSAGES.get(outcome.code, "Your card was declined.")
+    return DECLINE_MESSAGES.get(code, "Your card was declined.")
+
+
+def _new_charge(db: Session, pi: PaymentIntent, pm: PaymentMethod, **fields) -> Charge:
+    charge = Charge(
+        id=new_id("ch_"),
+        merchant_id=pi.merchant_id,
+        payment_intent_id=pi.id,
+        payment_method_id=pm.id,
+        amount=pi.amount,
+        currency=pi.currency,
+        amount_captured=0,
+        amount_refunded=0,
+        captured=False,
+        **fields,
+    )
+    db.add(charge)
+    db.flush()
+    pi.latest_charge_id = charge.id
+    return charge
+
+
+def approve(db: Session, pi: PaymentIntent, pm: PaymentMethod, request: Request | None) -> dict:
+    """Network approved: a succeeded charge; capture now unless capture_method is manual."""
+    charge = _new_charge(db, pi, pm, status="succeeded", authorized_at=clock.now())
+    if pi.capture_method == "manual":
+        pi.status = "requires_capture"
+        pi.amount_capturable = pi.amount
+        pi_event = "payment_intent.amount_capturable_updated"
+    else:
+        capture_charge(db, charge, pi.amount)
+        pi.status = "succeeded"
+        pi.amount_received = pi.amount
+        pi.amount_capturable = 0
+        pi_event = "payment_intent.succeeded"
+    pi.next_action = None
+    db.flush()
+    emit(db, pi.merchant_id, "charge.succeeded", charge_json(db, charge), request)
+    body = pi_json(pi)
+    emit(db, pi.merchant_id, pi_event, body, request)
+    return body
+
+
+def decline(
+    db: Session,
+    pi: PaymentIntent,
+    pm: PaymentMethod,
+    request: Request | None,
+    *,
+    charge_code: str,
+    error_code: str | None = None,
+    decline_code: str | None = None,
+    message: str | None = None,
+) -> Result:
+    """A failed charge; the PI goes back to requires_payment_method. `error_code` defaults to
+    the charge's failure code (3DS failure differs: payment_intent_authentication_failure)."""
+    message = message or _decline_message(charge_code, decline_code)
+    charge = _new_charge(
+        db, pi, pm, status="failed", failure_code=charge_code, failure_message=message
+    )
+    error = {"type": "card_error", "code": error_code or charge_code, "message": message}
+    if decline_code:
+        error["decline_code"] = decline_code
+    pi.last_payment_error = {**error, "payment_method": cards.payment_method_json(pm)}
+    pi.payment_method_id = None  # retry needs a new payment method (unverified vs Stripe, Q6)
+    pi.status = "requires_payment_method"
+    pi.next_action = None
+    db.flush()
+    emit(db, pi.merchant_id, "charge.failed", charge_json(db, charge), request)
+    body = pi_json(pi)
+    emit(db, pi.merchant_id, "payment_intent.payment_failed", body, request)
+    # A decline is a committed outcome (charge, events, idempotent response), not an error.
+    return Result(402, {"error": {**error, "payment_intent": body}})
 
 
 def confirm_pi(
@@ -183,7 +243,6 @@ def confirm_pi(
         )
     pm = db.get(PaymentMethod, pi.payment_method_id)
     outcome = network.authorize(pm.sim_outcome, pi.amount)
-    merchant_id = pi.merchant_id
 
     if isinstance(outcome, network.RequiresAuth):
         if not pi.return_url:
@@ -195,64 +254,21 @@ def confirm_pi(
                 param="return_url",
             )
         pi.status = "requires_action"
+        # ponytail: the client_secret rides in the query string (as on Stripe). The M16/M18
+        # page must send Referrer-Policy: no-referrer and never log query strings.
         pi.next_action = {
             "type": "redirect_to_url",
             "redirect_to_url": {
-                "url": f"{public_base_url()}/checkout/3ds/{pi.id}?client_secret={pi.client_secret}",
+                "url": f"{config.public_base_url()}/checkout/3ds/{pi.id}"
+                f"?client_secret={pi.client_secret}",
                 "return_url": pi.return_url,
             },
         }
         db.flush()
         body = pi_json(pi)
-        emit(db, merchant_id, "payment_intent.requires_action", body, request)
+        emit(db, pi.merchant_id, "payment_intent.requires_action", body, request)
         return body
 
-    approved = isinstance(outcome, network.Approved)
-    charge = Charge(
-        id=new_id("ch_"),
-        merchant_id=merchant_id,
-        payment_intent_id=pi.id,
-        payment_method_id=pm.id,
-        amount=pi.amount,
-        currency=pi.currency,
-        amount_captured=0,
-        amount_refunded=0,
-        captured=False,
-        status="succeeded" if approved else "failed",
-        failure_code=None if approved else outcome.code,
-        failure_message=None if approved else _decline_message(outcome),
-        authorized_at=clock.now() if approved else None,
-    )
-    db.add(charge)
-    db.flush()
-    pi.latest_charge_id = charge.id
-
-    if approved:
-        if pi.capture_method == "manual":
-            pi.status = "requires_capture"
-            pi.amount_capturable = pi.amount
-            pi_event = "payment_intent.amount_capturable_updated"
-        else:
-            capture_charge(db, charge, pi.amount)
-            pi.status = "succeeded"
-            pi.amount_received = pi.amount
-            pi.amount_capturable = 0
-            pi_event = "payment_intent.succeeded"
-        db.flush()
-        emit(db, merchant_id, "charge.succeeded", charge_json(db, charge), request)
-        body = pi_json(pi)
-        emit(db, merchant_id, pi_event, body, request)
-        return body
-
-    error = {"type": "card_error", "code": outcome.code, "message": charge.failure_message}
-    if outcome.decline_code:
-        error["decline_code"] = outcome.decline_code
-    pi.last_payment_error = {**error, "payment_method": payment_method_json(pm)}
-    pi.payment_method_id = None  # retry needs a new payment method (unverified vs Stripe, Q6)
-    pi.status = "requires_payment_method"
-    db.flush()
-    emit(db, merchant_id, "charge.failed", charge_json(db, charge), request)
-    body = pi_json(pi)
-    emit(db, merchant_id, "payment_intent.payment_failed", body, request)
-    # A decline is a committed outcome (charge, events, idempotent response), not an error.
-    return Result(402, {"error": {**error, "payment_intent": body}})
+    if isinstance(outcome, network.Approved):
+        return approve(db, pi, pm, request)
+    return decline(db, pi, pm, request, charge_code=outcome.code, decline_code=outcome.decline_code)
