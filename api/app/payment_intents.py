@@ -281,8 +281,9 @@ AUTHORIZATION_LIFETIME = timedelta(days=7)  # online card holds expire after ~7 
 
 
 def capture_pi(db: Session, pi: PaymentIntent, amount: int, request: Request | None) -> dict:
-    """Capture `amount` of an authorized PI (caller holds the PI lock). The uncaptured
-    remainder is released; amount_refunded is untouched (design §5.15)."""
+    """Capture `amount` of an authorized PI. The caller holds the PI lock and has checked
+    1 <= amount <= pi.amount_capturable. The uncaptured remainder is released;
+    amount_refunded is untouched (design §5.15)."""
     require_status(pi, "capture")
     charge = db.scalar(
         select(Charge)
@@ -301,22 +302,35 @@ def capture_pi(db: Session, pi: PaymentIntent, amount: int, request: Request | N
     return body
 
 
-def expire_authorizations(db: Session) -> int:
-    """Cancel uncaptured authorizations older than 7 days (run by the worker, M15).
+EXPIRY_BATCH = 100  # per run; the worker (M15) calls again every minute
 
-    ponytail: M17 must lock a checkout-owned PI's session first (lock order, design §5.2)."""
+
+def expire_authorizations(db: Session) -> int:
+    """Cancel uncaptured authorizations older than 7 days; returns how many. The caller owns
+    the transaction and commits (the worker, M15).
+
+    Rows another transaction holds are skipped, not waited on. Checkout PIs are
+    automatic-capture, so they never reach requires_capture (no session lock needed)."""
     cutoff = clock.now() - AUTHORIZATION_LIFETIME
-    expired = db.scalars(
+    candidates = db.scalars(
         select(PaymentIntent)
         .join(Charge, Charge.id == PaymentIntent.latest_charge_id)
         .where(PaymentIntent.status == "requires_capture", Charge.authorized_at < cutoff)
+        .order_by(PaymentIntent.seq)
+        .limit(EXPIRY_BATCH)
         .with_for_update(of=PaymentIntent, skip_locked=True)
         .execution_options(populate_existing=True)
     ).all()
-    for pi in expired:
+    canceled = 0
+    for pi in candidates:
+        # Postgres re-evaluates the WHERE clause on the locked row, but don't rely on that
+        # alone: a PI captured in between must never be marked canceled.
+        if pi.status != "requires_capture":
+            continue
         pi.status = "canceled"
         pi.cancellation_reason = "abandoned"
         pi.amount_capturable = 0
         db.flush()
         emit(db, pi.merchant_id, "payment_intent.canceled", pi_json(pi))
-    return len(expired)
+        canceled += 1
+    return canceled
