@@ -15,8 +15,22 @@ services:
       DATABASE_URL: postgresql://cleartill:cleartill@db:5432/cleartill
       SECRET_KEY: dev-only-secret-change-me-0123456789abcdef
       PUBLIC_BASE_URL: http://localhost:8000
+      ALLOW_INSECURE_URLS: "1"  # local dev only: webhooks may target the host machine
     command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"
     ports: ["8000:8000"]
     depends_on:
       db:
         condition: service_healthy
+  worker:
+    build: ./api
+    environment:
+      DATABASE_URL: postgresql://cleartill:cleartill@db:5432/cleartill
+      SECRET_KEY: dev-only-secret-change-me-0123456789abcdef
+      PUBLIC_BASE_URL: http://localhost:8000
+      ALLOW_INSECURE_URLS: "1"
+    command: sh -c "exec python -m app.worker"
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
