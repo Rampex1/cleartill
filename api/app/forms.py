@@ -207,3 +207,11 @@ def require_amount(
             param=param,
         )
     return value
+
+
+class ExpandParams(BaseModel):
+    """GET endpoints that support one-level expand[] (and nothing else)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expand: FormList[str] = []
