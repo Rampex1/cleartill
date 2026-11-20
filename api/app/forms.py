@@ -10,7 +10,6 @@ from typing import Annotated
 from urllib.parse import parse_qsl
 
 from fastapi import Request
-from fastapi.exceptions import RequestValidationError
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -21,7 +20,7 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
-from app.errors import ApiError
+from app.errors import MAX_PARAM_ECHO, ApiError, validation_error
 
 MAX_PAIRS = 1000
 MAX_DEPTH = 5
@@ -29,9 +28,6 @@ MAX_BODY_BYTES = 64 * 1024
 
 _KEY = re.compile(r"^([^\[\]]+)((?:\[[^\[\]]*\])*)$")
 _SEGMENT = re.compile(r"\[([^\[\]]*)\]")
-
-
-MAX_PARAM_ECHO = 100
 
 
 def _invalid(param: str, message: str) -> ApiError:
@@ -126,13 +122,50 @@ def validate[M: BaseModel](model: type[M], params: dict) -> M:
     try:
         return model.model_validate(params)
     except ValidationError as exc:
-        raise RequestValidationError(exc.errors()) from None
+        raise validation_error(exc.errors()) from None
 
 
 # Stripe limits: 50 keys, keys up to 40 chars (no brackets), values up to 500 chars.
+MAX_METADATA_KEYS = 50
 MetadataKey = Annotated[str, StringConstraints(min_length=1, max_length=40, pattern=r"^[^\[\]]+$")]
 MetadataValue = Annotated[str, StringConstraints(max_length=500)]
-Metadata = Annotated[dict[MetadataKey, MetadataValue], Field(max_length=50)]
+# Per request, `metadata[k]=` (removals) also count, so allow twice the stored cap; the stored
+# result is checked by `apply_metadata`.
+Metadata = Annotated[dict[MetadataKey, MetadataValue], Field(max_length=2 * MAX_METADATA_KEYS)]
+
+
+def pop_metadata_clear(params: dict) -> tuple[dict, bool]:
+    """`metadata=` (empty) means "remove every key". Returns (params without it, clear?)."""
+    if params.get("metadata") != "":
+        return params, False
+    params = dict(params)
+    del params["metadata"]
+    return params, True
+
+
+def apply_metadata(existing: dict, updates: dict | None, clear: bool) -> dict:
+    """Stripe semantics: keys merge; `metadata[k]=` removes k; `metadata=` clears all."""
+    merged = {} if clear else dict(existing)
+    for key, value in (updates or {}).items():
+        if value == "":
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    if len(merged) > MAX_METADATA_KEYS:
+        raise ApiError(
+            400,
+            "invalid_request_error",
+            f"Metadata can have at most {MAX_METADATA_KEYS} keys.",
+            code="parameter_invalid",
+            param="metadata",
+        )
+    return merged
+
+
+class NoParams(BaseModel):
+    """For endpoints that take no parameters (yet): unknown ones are rejected."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class ListParams(BaseModel):

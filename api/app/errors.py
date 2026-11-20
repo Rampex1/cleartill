@@ -13,6 +13,8 @@ from app.ids import new_id
 
 log = logging.getLogger("cleartill")
 
+MAX_PARAM_ECHO = 100
+
 # lock_not_available (lock_timeout) and deadlock_detected
 LOCK_SQLSTATES = {"55P03", "40P01"}
 
@@ -62,7 +64,8 @@ def _param_from_loc(loc) -> str | None:
         parts = parts[1:]
     if not parts:
         return None
-    return parts[0] + "".join(f"[{p}]" for p in parts[1:])
+    # Dict keys (e.g. metadata keys) are client-controlled: cap what we echo.
+    return (parts[0] + "".join(f"[{p}]" for p in parts[1:]))[:MAX_PARAM_ECHO]
 
 
 # Our own wording per Pydantic error type. Pydantic's `msg`, `input` and `ctx` are never used:
@@ -90,34 +93,35 @@ _PROBLEMS = {
 }
 
 
-def _validation_response(errors: list[dict]) -> JSONResponse:
+def validation_error(errors: list[dict]) -> ApiError:
+    """The 400 for a list of Pydantic errors (only the first is reported)."""
     first = errors[0]
     kind = first["type"]
     param = _param_from_loc(first["loc"])
     subject = f"param {param}" if param else "request"
     if kind == "missing":
-        return error_response(
+        return ApiError(
             400,
             "invalid_request_error",
             f"Missing required {subject}.",
-            "parameter_missing",
-            param,
+            code="parameter_missing",
+            param=param,
         )
     if kind == "extra_forbidden":
-        return error_response(
+        return ApiError(
             400,
             "invalid_request_error",
             f"Received unknown parameter: {param}.",
-            "parameter_unknown",
-            param,
+            code="parameter_unknown",
+            param=param,
         )
     problem = _PROBLEMS.get(kind, "is invalid")
-    return error_response(
+    return ApiError(
         400,
         "invalid_request_error",
         f"Invalid {subject}: it {problem}.",
-        "parameter_invalid",
-        param,
+        code="parameter_invalid",
+        param=param,
     )
 
 
@@ -208,7 +212,8 @@ def install(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def _request_validation_error(request: Request, exc: RequestValidationError):
-        return _validation_response(list(exc.errors()))
+        e = validation_error(list(exc.errors()))
+        return error_response(e.status, e.type, e.message, e.code, e.param)
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(request: Request, exc: StarletteHTTPException):
