@@ -10,7 +10,9 @@ services:
       interval: 2s
       retries: 15
   api:
-    build: ./api
+    build:
+      context: .
+      dockerfile: api/Dockerfile
     environment:
       DATABASE_URL: postgresql://cleartill:cleartill@db:5432/cleartill
       SECRET_KEY: dev-only-secret-change-me-0123456789abcdef
@@ -26,7 +28,9 @@ services:
       db:
         condition: service_healthy
   worker:
-    build: ./api
+    build:
+      context: .
+      dockerfile: api/Dockerfile
     environment:
       DATABASE_URL: postgresql://cleartill:cleartill@db:5432/cleartill
       SECRET_KEY: dev-only-secret-change-me-0123456789abcdef
