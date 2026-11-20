@@ -83,3 +83,16 @@ jobs:
       - run: uv sync --frozen
       - run: uv run python -c "import json; from app.main import app; print(json.dumps(app.openapi()))" > /tmp/openapi.json
       - run: uvx openapi-python-client@0.30.0 generate --path /tmp/openapi.json --output-path /tmp/generated --overwrite --fail-on-warning
+  smoke:
+    # The README quickstart, end to end, against the compose stack.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.22"
+      - run: docker compose up -d --build --wait
+      - run: uv run --with ./sdk scripts/smoke.py http://localhost:8000
+      - if: failure()
+        run: docker compose logs --tail 200
