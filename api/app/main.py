@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app import config, errors
+from app import config, errors, frontend
 from app.db import get_db
 from app.routers import (
     balance,
@@ -41,6 +41,7 @@ app.include_router(refunds.router)
 app.include_router(webhook_endpoints.router)
 app.include_router(checkout.router)
 app.include_router(checkout_sessions.router)
+frontend.install(app)  # after the routers: the SPA is the lowest-priority route
 
 
 @app.get("/healthz")

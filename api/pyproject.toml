@@ -13,6 +13,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "playwright>=1.65.2",
     "pytest>=9.2",
     "ruff>=0.17.6",
     "testcontainers[postgres]>=4.15",
