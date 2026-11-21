@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, CreditCard } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { EmptyState, Money, PaymentStatus, SkeletonRows, when } from "../ui.jsx";
 import { dashGet, errorMessage } from "./dash.js";
@@ -8,6 +8,7 @@ import { dashGet, errorMessage } from "./dash.js";
 const PAGE_SIZE = 20;
 
 export default function Payments() {
+  const navigate = useNavigate();
   const [cursor, setCursor] = useState(null);
   const [page, setPage] = useState(null);
   const [error, setError] = useState(null);
@@ -56,12 +57,22 @@ export default function Payments() {
                   <th>Payment</th>
                   <th>Customer</th>
                   <th>Date</th>
+                  <th>
+                    <span className="visually-hidden">Open</span>
+                  </th>
                 </tr>
               </thead>
               {page ? (
                 <tbody>
                   {page.data.map((pi) => (
-                    <tr key={pi.id}>
+                    <tr
+                      key={pi.id}
+                      className="row-clickable"
+                      // The whole row opens the payment; the id link stays the keyboard target.
+                      onClick={(e) => {
+                        if (!e.target.closest("a, button")) navigate(`/dashboard/payments/${pi.id}`);
+                      }}
+                    >
                       <td className="num strong">
                         <Money amount={pi.amount} currency={pi.currency} />
                       </td>
@@ -87,11 +98,14 @@ export default function Payments() {
                         )}
                       </td>
                       <td className="muted">{when(pi.created)}</td>
+                      <td className="num muted row-chevron">
+                        <ChevronRight size={16} aria-hidden="true" />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               ) : (
-                <SkeletonRows columns={5} />
+                <SkeletonRows columns={6} />
               )}
             </table>
           </div>
