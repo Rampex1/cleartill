@@ -18,7 +18,7 @@ Params = Annotated[dict, Depends(forms.params)]
 
 
 class ListBalanceTransactionsParams(forms.ListParams):
-    type: Literal["charge", "refund"] | None = None
+    type: Literal["charge", "refund", "payout"] | None = None
 
 
 def balance_transaction_json(bt: BalanceTransaction) -> dict:

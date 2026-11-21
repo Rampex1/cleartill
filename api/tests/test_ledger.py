@@ -245,7 +245,12 @@ def test_platform_accounts_exist(db):
     rows = db.execute(
         text("SELECT kind FROM ledger_accounts WHERE merchant_id IS NULL AND currency = 'usd'")
     ).all()
-    assert sorted(r.kind for r in rows) == ["card_network_clearing", "platform_fees"]
+    # M23 (user-approved milestone) adds payouts_in_transit, per design §5.16.
+    assert sorted(r.kind for r in rows) == [
+        "card_network_clearing",
+        "payouts_in_transit",
+        "platform_fees",
+    ]
 
 
 def test_second_platform_account_of_same_kind_and_currency_fails(db):

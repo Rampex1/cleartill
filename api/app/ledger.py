@@ -13,7 +13,13 @@ from sqlalchemy.orm import Session
 
 from app import clock
 from app.ids import new_id
-from app.models import BalanceTransaction, JournalEntry, JournalTransaction, LedgerAccount
+from app.models import (
+    BalanceTransaction,
+    JournalEntry,
+    JournalTransaction,
+    LedgerAccount,
+    Payout,
+)
 
 MERCHANT_KINDS = ("merchant_pending", "merchant_available")
 
@@ -187,6 +193,84 @@ def post_refund(
     db.add(bt)
     db.flush()
     return bt
+
+
+def lock_available(db: Session, merchant_id: str, currency: str) -> None:
+    """Serialise payouts per merchant: lock the merchant_available account row before reading
+    the balance (design §5.16; the last entry in the §5.2 lock order). Refunds don't take it,
+    so a concurrent refund can still push available below zero afterwards (allowed)."""
+    db.execute(
+        select(LedgerAccount.id)
+        .where(
+            LedgerAccount.merchant_id == merchant_id,
+            LedgerAccount.kind == "merchant_available",
+            LedgerAccount.currency == currency,
+        )
+        .with_for_update()
+    )
+
+
+def post_payout(
+    db: Session, merchant_id: str, payout_id: str, amount: int, currency: str = "usd"
+) -> BalanceTransaction:
+    """Money leaves available for the bank: Dr merchant_available A, Cr payouts_in_transit A."""
+    if amount < 1:
+        raise ValueError("payout amount must be at least 1")
+    jtx_id = post(
+        db,
+        "payout",
+        payout_id,
+        currency,
+        [
+            (account_id(db, merchant_id, "merchant_available", currency), amount),
+            (account_id(db, None, "payouts_in_transit", currency), -amount),
+        ],
+    )
+    now = clock.now()
+    bt = BalanceTransaction(
+        id=new_id("txn_"),
+        merchant_id=merchant_id,
+        type="payout",
+        amount=-amount,
+        fee=0,
+        net=-amount,
+        currency=currency,
+        status="available",
+        available_on=now,
+        source_id=payout_id,
+        journal_transaction_id=jtx_id,
+        created=now,
+    )
+    db.add(bt)
+    db.flush()
+    return bt
+
+
+def settle_payout(db: Session, payout: Payout) -> bool:
+    """The bank received it: Dr payouts_in_transit A, Cr card_network_clearing A (network
+    settlement goes straight to the merchant's bank). The status flip is the gate, as in
+    release(): a racing or repeated settle posts nothing."""
+    db.flush()
+    paid = db.scalar(
+        update(Payout)
+        .where(Payout.id == payout.id, Payout.status == "pending")
+        .values(status="paid", paid_at=clock.now())
+        .returning(Payout.amount)
+    )
+    db.refresh(payout)
+    if paid is None:
+        return False
+    post(
+        db,
+        "payout_paid",
+        payout.id,
+        payout.currency,
+        [
+            (account_id(db, None, "payouts_in_transit", payout.currency), paid),
+            (account_id(db, None, "card_network_clearing", payout.currency), -paid),
+        ],
+    )
+    return True
 
 
 def balance(db: Session, merchant_id: str) -> dict:

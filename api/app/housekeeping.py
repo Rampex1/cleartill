@@ -6,7 +6,7 @@ import logging
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app import checkout, clock, executor, ledger, payment_intents
+from app import checkout, clock, executor, ledger, payment_intents, payouts
 from app.db import SessionLocal
 from app.models import BalanceTransaction, DashboardSession
 
@@ -54,6 +54,7 @@ def _jobs() -> dict:
         "purged_idempotency_keys": executor.purge_idempotency_keys,
         "purged_sessions": purge_dashboard_sessions,
         "expired_checkout_sessions": checkout.expire_sessions,
+        "paid_payouts": payouts.pay_due_payouts,
     }
 
 
