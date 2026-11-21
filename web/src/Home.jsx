@@ -2,7 +2,7 @@ import { ArrowRight, BookOpen, CheckCircle2, CreditCard, GitBranch, RotateCcw } 
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
-import { postForm } from "./api.js";
+import { useDemoAccount } from "./dashboard/useDemoAccount.js";
 import { Logo, Money, Spinner } from "./ui.jsx";
 
 const REPO = "https://github.com/Rampex1/cleartill";
@@ -121,6 +121,7 @@ export function ExampleRecord() {
 
 export default function Home() {
   const demo = useDemoCheckout();
+  const account = useDemoAccount();
   return (
     <>
       <header className="site-nav">
@@ -160,14 +161,20 @@ export default function Home() {
                 {demo.busy ? <Spinner /> : <CreditCard size={17} aria-hidden="true" />}
                 Try a live checkout
               </button>
-              <Link className="btn btn-secondary btn-lg" to="/dashboard/signup">
-                Create an account
+              <button
+                type="button"
+                className="btn btn-secondary btn-lg"
+                onClick={account.start}
+                disabled={account.busy}
+              >
+                {account.busy ? <Spinner /> : null}
+                Explore a demo account
                 <ArrowRight size={16} aria-hidden="true" />
-              </Link>
+              </button>
             </div>
-            {demo.error ? (
+            {demo.error || account.error ? (
               <p className="alert hero-note" role="alert">
-                {demo.error}
+                {demo.error ?? account.error}
               </p>
             ) : (
               <p className="hero-note hero-note-text">
@@ -271,7 +278,7 @@ export default function Home() {
         <section className="cta-band">
           <div>
             <h2>See a payment through.</h2>
-            <p>Pay the demo checkout, then open the dashboard to follow it.</p>
+            <p>Pay the demo checkout and see the ledger entries it made, or open a demo account.</p>
           </div>
           <div className="row">
             <button

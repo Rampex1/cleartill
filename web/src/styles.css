@@ -2492,3 +2492,52 @@ code,
     display: none;
   }
 }
+
+
+/* ---- demo paths ----------------------------------------------------------------------- */
+
+.demo-path {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.receipt-card {
+  max-width: 560px;
+}
+
+.receipt-timeline {
+  margin: 22px 0 4px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.receipt-next {
+  margin: 18px 0 16px;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
+.receipt-foot {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 13.5px;
+}
