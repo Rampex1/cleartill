@@ -4,6 +4,10 @@
 checkout, a merchant dashboard, a Python SDK and signed webhooks, with every cent booked in a
 double-entry ledger that the database itself keeps balanced.
 
+**Live demo: [cleartill.onrender.com](https://cleartill.onrender.com).** Click "Try a live
+checkout" and pay with `4242 4242 4242 4242`, or create an account to explore the dashboard.
+<sub>It runs on a free plan that sleeps when idle, so the first visit can take up to a minute.</sub>
+
 ![Payment detail: the payment's lifecycle with the ledger postings behind each step](docs/screenshots/payment.webp)
 
 <sub>A payment's full life: authorized, captured, funds released, partially refunded. Each step
