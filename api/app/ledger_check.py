@@ -71,6 +71,44 @@ PROBLEM_QUERIES = {
          AND bt.merchant_id = r.merchant_id AND bt.currency = r.currency
         WHERE bt.id IS NULL OR bt.amount <> -r.amount
     """,
+    "payouts in transit don't match pending payouts": """
+        WITH transit AS (
+            SELECT a.currency, -coalesce(sum(e.amount), 0) AS booked
+            FROM ledger_accounts a LEFT JOIN journal_entries e ON e.account_id = a.id
+            WHERE a.kind = 'payouts_in_transit' GROUP BY a.currency
+        ), pending AS (
+            SELECT currency, sum(amount) AS owed FROM payouts WHERE status = 'pending' GROUP BY 1
+        )
+        SELECT coalesce(transit.currency, pending.currency), coalesce(booked, 0),
+               coalesce(owed, 0)
+        FROM transit FULL JOIN pending ON pending.currency = transit.currency
+        WHERE coalesce(booked, 0) <> coalesce(owed, 0)
+    """,
+    "payout doesn't match its balance transaction": """
+        SELECT p.id, p.amount, bt.amount FROM payouts p
+        LEFT JOIN balance_transactions bt
+          ON bt.id = p.balance_transaction_id AND bt.source_id = p.id AND bt.type = 'payout'
+         AND bt.merchant_id = p.merchant_id AND bt.currency = p.currency
+        WHERE bt.id IS NULL OR bt.amount <> -p.amount
+    """,
+    "card clearing doesn't match captures - refunds - paid payouts": """
+        WITH clearing AS (
+            SELECT a.currency, coalesce(sum(e.amount), 0) AS booked
+            FROM ledger_accounts a LEFT JOIN journal_entries e ON e.account_id = a.id
+            WHERE a.kind = 'card_network_clearing' GROUP BY a.currency
+        ), expected AS (
+            SELECT currency, sum(amount) AS due FROM (
+                SELECT currency, amount FROM balance_transactions
+                WHERE type IN ('charge', 'refund')
+                UNION ALL
+                SELECT currency, -amount FROM payouts WHERE status = 'paid'
+            ) flows GROUP BY 1
+        )
+        SELECT coalesce(clearing.currency, expected.currency), coalesce(booked, 0),
+               coalesce(due, 0)
+        FROM clearing FULL JOIN expected ON expected.currency = clearing.currency
+        WHERE coalesce(booked, 0) <> coalesce(due, 0)
+    """,
     "platform fees don't match balance transaction fees": """
         WITH fees AS (
             SELECT a.currency, -coalesce(sum(e.amount), 0) AS booked

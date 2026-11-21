@@ -99,7 +99,7 @@ class LedgerAccount(Base):
         ),
         CheckConstraint(
             "kind IN ('merchant_pending', 'merchant_available', "
-            "'card_network_clearing', 'platform_fees')",
+            "'card_network_clearing', 'platform_fees', 'payouts_in_transit')",
             name="ledger_accounts_kind",
         ),
         # Target of journal_entries' (account_id, currency) FK: an entry's currency must be
@@ -438,3 +438,27 @@ class CheckoutSession(Base):
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+
+
+class Payout(Base):
+    __tablename__ = "payouts"
+    __table_args__ = (
+        Index("ix_payouts_merchant_seq", "merchant_id", "seq"),
+        Index("payouts_due", "arrival_date", postgresql_where=text("status = 'pending'")),
+        CheckConstraint("amount > 0", name="payouts_amount_positive"),
+        CheckConstraint("status IN ('pending', 'paid')", name="payouts_status"),
+    )
+    object_name = "payout"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"))
+    amount: Mapped[int] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default="pending")
+    arrival_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    balance_transaction_id: Mapped[str | None] = mapped_column(
+        ForeignKey("balance_transactions.id")
+    )
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: clock.now())
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

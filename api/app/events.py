@@ -33,6 +33,8 @@ KNOWN_EVENT_TYPES = frozenset(
         "refund.created",
         "checkout.session.completed",
         "checkout.session.expired",
+        "payout.created",
+        "payout.paid",
     }
 )
 

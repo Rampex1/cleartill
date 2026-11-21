@@ -45,6 +45,7 @@ class Client:
         self.balance_transactions = _Resource(self, "balance_transactions", "rl")
         self.events = _Resource(self, "events", "rl")
         self.webhook_endpoints = _Resource(self, "webhook_endpoints", "crudl")
+        self.payouts = _Resource(self, "payouts", "crl")
         self.checkout = _Namespace(sessions=_Resource(self, "checkout/sessions", "crl"))
 
     def close(self) -> None:

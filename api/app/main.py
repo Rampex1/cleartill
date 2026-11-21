@@ -19,6 +19,7 @@ from app.routers import (
     events,
     payment_intents,
     payment_methods,
+    payouts,
     refunds,
     webhook_endpoints,
 )
@@ -41,6 +42,7 @@ app.include_router(refunds.router)
 app.include_router(webhook_endpoints.router)
 app.include_router(checkout.router)
 app.include_router(checkout_sessions.router)
+app.include_router(payouts.router)
 frontend.install(app)  # after the routers: the SPA is the lowest-priority route
 
 
