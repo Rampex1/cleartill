@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 from app import clock, config
 from app.errors import ApiError
 from app.events import emit
+from app.ids import new_id
 from app.models import Charge, CheckoutSession, PaymentIntent
-from app.payment_intents import pi_json
+from app.payment_intents import create_pi, pi_json
 
 log = logging.getLogger("cleartill.checkout")
 
@@ -153,3 +154,50 @@ def _expire(db: Session, cs: CheckoutSession) -> int:
     db.flush()
     emit(db, pi.merchant_id, "payment_intent.canceled", pi_json(pi))
     return 1
+
+
+def create_session(
+    db: Session,
+    merchant_id: str,
+    items: list[dict],
+    *,
+    success_url: str,
+    cancel_url: str | None = None,
+    customer_id: str | None = None,
+    client_reference_id: str | None = None,
+    metadata: dict | None = None,
+    request: Request | None = None,
+) -> CheckoutSession:
+    """A session plus its eager PI (emits payment_intent.created). `items` are validated
+    line items: [{name, quantity, unit_amount, amount_total}]."""
+    cs = CheckoutSession(
+        id=new_id("cs_"),
+        merchant_id=merchant_id,
+        amount_total=sum(i["amount_total"] for i in items),
+        currency="usd",
+        line_items=items,
+        status="open",
+        payment_status="unpaid",
+        success_url=success_url,
+        cancel_url=cancel_url,
+        customer_id=customer_id,
+        client_reference_id=client_reference_id,
+        metadata_=metadata or {},
+        expires_at=clock.now() + SESSION_LIFETIME,
+    )
+    db.add(cs)
+    db.flush()
+    pi = create_pi(
+        db,
+        merchant_id,
+        amount=cs.amount_total,
+        currency="usd",
+        capture_method="automatic",
+        customer_id=customer_id,
+        return_url=session_json(cs)["url"],
+        checkout_session_id=cs.id,
+        request=request,
+    )
+    cs.payment_intent_id = pi.id
+    db.flush()
+    return cs

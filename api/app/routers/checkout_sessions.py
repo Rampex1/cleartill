@@ -5,14 +5,12 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import checkout, clock, forms
+from app import checkout, forms
 from app.auth import AuthContext, require_secret_key
 from app.db import get_db
 from app.errors import ApiError
 from app.executor import execute
-from app.ids import new_id
 from app.models import CheckoutSession, Customer
-from app.payment_intents import create_pi
 from app.tenancy import get_owned, paginate
 from app.urls import validate_redirect_url
 
@@ -94,36 +92,17 @@ def create_session(request: Request, auth: Auth, db: Db, params: Params):
             if data.customer
             else None
         )
-        cs = CheckoutSession(
-            id=new_id("cs_"),
-            merchant_id=merchant_id,
-            amount_total=total,
-            currency="usd",
-            line_items=items,
-            status="open",
-            payment_status="unpaid",
+        cs = checkout.create_session(
+            db,
+            merchant_id,
+            items,
             success_url=success_url,
             cancel_url=cancel_url,
             customer_id=customer_id,
             client_reference_id=data.client_reference_id or None,
-            metadata_=forms.apply_metadata({}, data.metadata, clear=False),
-            expires_at=clock.now() + checkout.SESSION_LIFETIME,
-        )
-        db.add(cs)
-        db.flush()
-        pi = create_pi(
-            db,
-            merchant_id,
-            amount=total,
-            currency="usd",
-            capture_method="automatic",
-            customer_id=customer_id,
-            return_url=checkout.session_json(cs)["url"],
-            checkout_session_id=cs.id,
+            metadata=forms.apply_metadata({}, data.metadata, clear=False),
             request=request,
         )
-        cs.payment_intent_id = pi.id
-        db.flush()
         return checkout.session_json(cs)
 
     return execute(db, request, auth.merchant.id, params, handler)

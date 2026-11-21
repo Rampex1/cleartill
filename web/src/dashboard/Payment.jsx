@@ -1,17 +1,211 @@
+import {
+  ArrowLeft,
+  Banknote,
+  CheckCircle2,
+  CircleDashed,
+  Clock3,
+  CreditCard,
+  RotateCcw,
+  ShieldAlert,
+  XCircle,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { money } from "../api.js";
+import { Money, PaymentStatus, Spinner, Token, fullTime, money, when } from "../ui.jsx";
 import { dashGet, dashPost, errorMessage, useIdempotencyKey } from "./dash.js";
-import { date } from "./Payments.jsx";
+
+const ACCOUNTS = {
+  card_network_clearing: ["Card network clearing", "platform"],
+  platform_fees: ["Platform fees", "platform"],
+  payouts_in_transit: ["Payouts in transit", "platform"],
+  merchant_pending: ["Pending balance", "yours"],
+  merchant_available: ["Available balance", "yours"],
+};
+
+/* Which event best names a step, in priority order. */
+const STEP_TITLES = [
+  ["payment_intent.payment_failed", "Payment failed", "danger", XCircle],
+  ["charge.failed", "Payment failed", "danger", XCircle],
+  ["refund.created", "Refund issued", "neutral", RotateCcw],
+  ["charge.captured", "Captured", "success", CheckCircle2],
+  ["payment_intent.succeeded", "Payment succeeded", "success", CheckCircle2],
+  ["payment_intent.amount_capturable_updated", "Authorized", "info", Clock3],
+  ["charge.succeeded", "Charge succeeded", "success", CheckCircle2],
+  ["payment_intent.requires_action", "Authentication requested", "warning", ShieldAlert],
+  ["payment_intent.canceled", "Canceled", "neutral", XCircle],
+  ["payment_intent.created", "Payment created", "neutral", CircleDashed],
+];
+
+const POSTING_TITLES = { release: "Funds became available" };
+
+/* Group events emitted by one API request into one step (worker events stand alone), then
+   pin each journal posting to the step that caused it: captures to the capture, refunds to
+   their refund. */
+function buildSteps(timeline) {
+  const steps = [];
+  for (const event of timeline.events) {
+    const last = steps.at(-1);
+    if (last && event.request && last.request === event.request) last.events.push(event.type);
+    else {
+      steps.push({
+        created: event.created,
+        request: event.request,
+        events: [event.type],
+        postings: [],
+      });
+    }
+  }
+  for (const step of steps) {
+    const match = STEP_TITLES.find(([type]) => step.events.includes(type));
+    [, step.title, step.tone, step.Icon] = match ?? [null, step.events[0], "neutral", CircleDashed];
+  }
+  const refundSteps = steps.filter((s) => s.events.includes("refund.created"));
+  const captureStep =
+    steps.find((s) => s.events.includes("charge.captured")) ??
+    steps.find((s) => s.events.includes("payment_intent.succeeded"));
+  for (const posting of timeline.postings) {
+    let target = null;
+    if (posting.type === "charge") target = captureStep;
+    else if (posting.type === "refund") target = refundSteps.shift();
+    if (target) target.postings.push(posting);
+    else {
+      steps.push({
+        created: posting.created,
+        events: [],
+        postings: [posting],
+        title: POSTING_TITLES[posting.type] ?? posting.type,
+        tone: "success",
+        Icon: Banknote,
+      });
+    }
+  }
+  return steps.sort((a, b) => a.created - b.created);
+}
+
+function Posting({ posting }) {
+  return (
+    <div className="ledger">
+      <div className="ledger-head">
+        <span>Ledger · {posting.type.replace("_", " ")}</span>
+        <span className="id">{posting.id}</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th className="num">Debit</th>
+            <th className="num">Credit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {posting.entries.map((entry, i) => {
+            const [name, owner] = ACCOUNTS[entry.account] ?? [entry.account, ""];
+            return (
+              <tr key={i}>
+                <td>
+                  <span className="account-name">
+                    {name}
+                    <small>{owner}</small>
+                  </span>
+                </td>
+                <td className="num" data-side="Dr">
+                  {entry.amount > 0 ? <Money amount={entry.amount} currency={entry.currency} /> : ""}
+                </td>
+                <td className="num" data-side="Cr">
+                  {entry.amount < 0 ? (
+                    <Money amount={-entry.amount} currency={entry.currency} />
+                  ) : (
+                    ""
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const HOLD_SECONDS = 7 * 24 * 3600; // uncaptured authorizations expire after 7 days
+
+function Timeline({ timeline, pi }) {
+  if (!timeline) {
+    return (
+      <div className="stack-sm" aria-hidden="true">
+        <span className="skeleton" />
+        <span className="skeleton" />
+        <span className="skeleton" />
+      </div>
+    );
+  }
+  const steps = buildSteps(timeline);
+  if (pi.status === "requires_capture") {
+    const authorized = steps.find((s) => s.events.includes("charge.succeeded"));
+    steps.push({
+      created: null,
+      events: [],
+      postings: [],
+      title: "Capture",
+      tone: "pending",
+      Icon: Clock3,
+      ghost: authorized
+        ? `Waiting for you. The hold expires ${when(authorized.created + HOLD_SECONDS)} if not captured.`
+        : "Waiting for you to capture the authorized amount.",
+    });
+  }
+  return (
+    <div className="timeline">
+      {steps.map((step, i) => {
+        const Icon = step.Icon;
+        return (
+          <div className="timeline-step" key={i}>
+            <span className={`timeline-dot tone-${step.tone}`}>
+              <Icon size={14} strokeWidth={2.25} aria-hidden="true" />
+            </span>
+            <div className="timeline-body">
+              <div className="timeline-title">
+                <strong>{step.title}</strong>
+                {step.created !== null && (
+                  <time
+                    dateTime={new Date(step.created * 1000).toISOString()}
+                    title={fullTime(step.created)}
+                  >
+                    {when(step.created)}
+                  </time>
+                )}
+              </div>
+              {step.events.length > 0 && (
+                <p className="timeline-events mono">
+                  {step.events.map((type, i) => (
+                    <span key={type + i}>
+                      {i > 0 && " · "}
+                      <Token>{type}</Token>
+                    </span>
+                  ))}
+                </p>
+              )}
+              {step.ghost && <p className="timeline-events">{step.ghost}</p>}
+              {step.postings.map((p) => (
+                <Posting key={p.id} posting={p} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function Payment() {
   const { id } = useParams();
   const [pi, setPi] = useState(null);
   const [charge, setCharge] = useState(null);
   const [refunds, setRefunds] = useState([]);
+  const [timeline, setTimeline] = useState(null);
   const [error, setError] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(null); // "capture" | "refund" | null
   const [captureKeyFor, settleCapture] = useIdempotencyKey();
   const [refundKeyFor, settleRefund] = useIdempotencyKey();
 
@@ -28,25 +222,35 @@ export default function Payment() {
     // ponytail: first 100 refunds only; paginate if a payment ever has more.
     const r = await dashGet(`/v1/refunds?${new URLSearchParams({ payment_intent: id, limit: 100 })}`);
     if (r.status === 200) setRefunds(r.body.data);
+    const t = await dashGet(`/dashboard-api/payment_intents/${encodeURIComponent(id)}/timeline`);
+    if (t.status === 200) setTimeline(t.body);
   }, [id]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  async function act(path, fields, keyFor, settle) {
-    setBusy(true);
+  async function act(kind, path, fields, keyFor, settle, onSuccess = () => {}) {
+    setBusy(kind);
     setError(null);
     const res = await dashPost(path, fields, keyFor(fields));
     settle(res.status); // keeps the key only when no response arrived (safe retry)
-    if (res.status !== 200) setError(errorMessage(res));
+    // Clear inputs the moment it succeeded, not after the reload: anything typed meanwhile
+    // is the next action and must survive.
+    if (res.status === 200) onSuccess();
+    else setError(errorMessage(res));
     await load();
-    setBusy(false);
-    return res.status === 200;
+    setBusy(null);
   }
 
   function capture() {
-    act(`/v1/payment_intents/${encodeURIComponent(id)}/capture`, {}, captureKeyFor, settleCapture);
+    act(
+      "capture",
+      `/v1/payment_intents/${encodeURIComponent(id)}/capture`,
+      {},
+      captureKeyFor,
+      settleCapture,
+    );
   }
 
   async function refund(event) {
@@ -54,81 +258,179 @@ export default function Payment() {
     const form = event.currentTarget;
     const amount = new FormData(form).get("amount").trim();
     const fields = { payment_intent: id, ...(amount ? { amount } : {}) };
-    if (await act("/v1/refunds", fields, refundKeyFor, settleRefund)) form.reset();
+    await act("refund", "/v1/refunds", fields, refundKeyFor, settleRefund, () => form.reset());
   }
 
   if (!pi) {
     return error ? (
-      <p className="error" role="alert">
+      <p className="alert" role="alert">
         {error}
       </p>
     ) : (
-      <p>Loading…</p>
+      <div className="stack-sm" aria-hidden="true">
+        <span className="skeleton loading-bar" />
+      </div>
     );
   }
 
   const refundable =
     charge?.captured && charge.amount_refunded < charge.amount_captured && pi.status === "succeeded";
+  const remaining = charge ? charge.amount_captured - charge.amount_refunded : 0;
+  const fullyRefunded = charge?.captured && charge.amount_refunded === charge.amount_captured;
   return (
     <>
-      <p>
-        <Link to="/dashboard/payments">← Payments</Link>
-      </p>
-      <h1>Payment</h1>
-      <dl className="facts">
-        <dt>ID</dt>
-        <dd>
-          <code>{pi.id}</code>
-        </dd>
-        <dt>Amount</dt>
-        <dd>{money(pi.amount, pi.currency)}</dd>
-        <dt>Status</dt>
-        <dd>{pi.status}</dd>
-        <dt>Capture method</dt>
-        <dd>{pi.capture_method}</dd>
-        <dt>Created</dt>
-        <dd>{date(pi.created)}</dd>
-        {charge && (
-          <>
-            <dt>Charge</dt>
-            <dd>
-              <code>{charge.id}</code> {charge.status}
-              {charge.captured ? `, captured ${money(charge.amount_captured, pi.currency)}` : ""}
-            </dd>
-          </>
-        )}
-      </dl>
+      <nav className="crumbs" aria-label="Breadcrumb">
+        <Link to="/dashboard/payments">
+          <ArrowLeft size={14} aria-hidden="true" />
+          All payments
+        </Link>
+        <span aria-hidden="true">/</span>
+        <h1>Payment</h1>
+      </nav>
+      <div className="payment-head">
+        <div className="payment-title">
+          <div className="payment-amount">
+            <Money amount={pi.amount} currency={pi.currency} display showCurrency />
+            <PaymentStatus
+              status={pi.status}
+              refunded={fullyRefunded}
+              failed={Boolean(pi.last_payment_error)}
+            />
+          </div>
+          <span className="id">{pi.id}</span>
+        </div>
+      </div>
+
       {error && (
-        <p className="error" role="alert">
+        <p className="alert" role="alert">
           {error}
         </p>
       )}
-      {pi.status === "requires_capture" && (
-        <button type="button" disabled={busy} onClick={capture}>
-          Capture
-        </button>
-      )}
-      {refundable && (
-        <form onSubmit={refund} className="row refund">
-          <label>
-            Refund amount (cents)
-            <input name="amount" inputMode="numeric" placeholder="Blank refunds all remaining" />
-          </label>
-          <button type="submit" disabled={busy}>
-            Refund
-          </button>
-        </form>
-      )}
-      {refunds.length > 0 && (
-        <>
-          <h2>Refunds</h2>
-          <ul>
-            {refunds.map((r) => (
-              <li key={r.id}>Refunded {money(r.amount, r.currency)}</li>
-            ))}
-          </ul>
-        </>
-      )}
+
+      <div className="payment-grid">
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Timeline</h2>
+            <p>Events and the ledger postings behind them</p>
+          </div>
+          <div className="panel-body">
+            <Timeline timeline={timeline} pi={pi} />
+          </div>
+        </section>
+
+        <div className="stack">
+          {(pi.status === "requires_capture" || refundable) && (
+            <section className="panel">
+              <div className="panel-head">
+                <h2>{pi.status === "requires_capture" ? "Capture funds" : "Issue a refund"}</h2>
+              </div>
+              <div className="panel-body action-form">
+                {pi.status === "requires_capture" && (
+                  <>
+                    <p className="muted-text">
+                      {money(pi.amount_capturable, pi.currency)} is authorized and waiting. Holds
+                      expire after 7 days.
+                    </p>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={busy !== null}
+                      onClick={capture}
+                    >
+                      {busy === "capture" && <Spinner />}
+                      Capture
+                    </button>
+                  </>
+                )}
+                {refundable && (
+                  <form onSubmit={refund} className="refund action-form">
+                    <label className="field">
+                      Refund amount (cents)
+                      <input
+                        className="input"
+                        name="amount"
+                        inputMode="numeric"
+                        placeholder={`Blank refunds all ${money(remaining, pi.currency)}`}
+                      />
+                    </label>
+                    <button type="submit" className="btn btn-secondary" disabled={busy !== null}>
+                      {busy === "refund" ? <Spinner /> : <RotateCcw size={14} aria-hidden="true" />}
+                      Refund
+                    </button>
+                  </form>
+                )}
+              </div>
+            </section>
+          )}
+
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Details</h2>
+            </div>
+            <div className="panel-body">
+              <dl className="facts">
+                <dt>Status</dt>
+                <dd>
+                  <code>{pi.status}</code>
+                </dd>
+                <dt>Amount received</dt>
+                <dd>
+                  <Money amount={pi.amount_received} currency={pi.currency} />
+                </dd>
+                <dt>Capture method</dt>
+                <dd>{pi.capture_method === "manual" ? "Manual" : "Automatic"}</dd>
+                <dt>Payment method</dt>
+                <dd className="id truncate" title={pi.payment_method ?? undefined}>
+                  {pi.payment_method ?? "—"}
+                </dd>
+                <dt>Customer</dt>
+                <dd className="id truncate" title={pi.customer ?? undefined}>
+                  {pi.customer ?? "—"}
+                </dd>
+                <dt>Charge</dt>
+                <dd>
+                  {charge ? (
+                    <>
+                      <span className="id truncate" title={charge.id}>
+                        {charge.id}
+                      </span>
+                      {charge.captured
+                        ? `${money(charge.amount_captured, pi.currency)} captured`
+                        : charge.status === "succeeded"
+                          ? "Authorized, not captured yet"
+                          : "Failed"}
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </dd>
+                <dt>Created</dt>
+                <dd title={fullTime(pi.created)}>{when(pi.created)}</dd>
+              </dl>
+            </div>
+          </section>
+
+          {refunds.length > 0 && (
+            <section className="panel">
+              <div className="panel-head">
+                <h2>Refunds</h2>
+                <Money amount={charge?.amount_refunded ?? 0} currency={pi.currency} />
+              </div>
+              <ul className="refund-list">
+                {refunds.map((r) => (
+                  <li key={r.id}>
+                    <RotateCcw size={14} aria-hidden="true" />
+                    <span>
+                      Refunded <Money amount={r.amount} currency={r.currency} />
+                    </span>
+                    <time>{when(r.created)}</time>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+      </div>
     </>
   );
 }

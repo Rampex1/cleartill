@@ -1,14 +1,11 @@
+import { ChevronLeft, ChevronRight, CreditCard } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { money } from "../api.js";
+import { EmptyState, Money, PaymentStatus, SkeletonRows, when } from "../ui.jsx";
 import { dashGet, errorMessage } from "./dash.js";
 
 const PAGE_SIZE = 20;
-
-export function date(unix) {
-  return new Date(unix * 1000).toLocaleString();
-}
 
 export default function Payments() {
   const [cursor, setCursor] = useState(null);
@@ -17,7 +14,7 @@ export default function Payments() {
 
   useEffect(() => {
     let stale = false; // a slower, older page must not overwrite a newer one
-    const query = new URLSearchParams({ limit: PAGE_SIZE });
+    const query = new URLSearchParams({ limit: PAGE_SIZE, "expand[]": "data.customer" });
     if (cursor) query.set("starting_after", cursor);
     setError(null);
     dashGet(`/v1/payment_intents?${query}`).then((res) => {
@@ -32,47 +29,97 @@ export default function Payments() {
 
   return (
     <>
-      <h1>Payments</h1>
+      <div className="page-head">
+        <div>
+          <h1>Payments</h1>
+          <p>Every payment intent on this account, newest first.</p>
+        </div>
+      </div>
       {error && (
-        <p className="error" role="alert">
+        <p className="alert" role="alert">
           {error}
         </p>
       )}
-      {page && page.data.length === 0 && <p>No payments yet.</p>}
-      {page && page.data.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Payment</th>
-              <th>Amount</th>
-              <th>Status</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {page.data.map((pi) => (
-              <tr key={pi.id}>
-                <td>
-                  <Link to={`/dashboard/payments/${pi.id}`}>{pi.id}</Link>
-                </td>
-                <td>{money(pi.amount, pi.currency)}</td>
-                <td>{pi.status}</td>
-                <td>{date(pi.created)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <div className="row">
-        {cursor && (
-          <button type="button" className="secondary" onClick={() => setCursor(null)}>
-            First page
-          </button>
+      <div className="panel">
+        {page && page.data.length === 0 ? (
+          <EmptyState icon={CreditCard} title="No payments yet">
+            Create a payment intent with your secret key, or pay a checkout session, and it
+            appears here with its full timeline.
+          </EmptyState>
+        ) : (
+          <div className="table-wrap">
+            <table className="table table-stack">
+              <thead>
+                <tr>
+                  <th className="num">Amount</th>
+                  <th>Status</th>
+                  <th>Payment</th>
+                  <th>Customer</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              {page ? (
+                <tbody>
+                  {page.data.map((pi) => (
+                    <tr key={pi.id}>
+                      <td className="num strong">
+                        <Money amount={pi.amount} currency={pi.currency} />
+                      </td>
+                      <td>
+                        <PaymentStatus
+                          status={pi.status}
+                          failed={Boolean(pi.last_payment_error)}
+                        />
+                      </td>
+                      <td>
+                        <Link className="id-link" to={`/dashboard/payments/${pi.id}`}>
+                          {pi.id}
+                        </Link>
+                      </td>
+                      <td>
+                        {pi.customer ? (
+                          <span className="person">
+                            <strong>{pi.customer.name ?? pi.customer.email ?? pi.customer.id}</strong>
+                            {pi.customer.name && pi.customer.email && <small>{pi.customer.email}</small>}
+                          </span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td className="muted">{when(pi.created)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              ) : (
+                <SkeletonRows columns={5} />
+              )}
+            </table>
+          </div>
         )}
-        {page?.has_more && (
-          <button type="button" onClick={() => setCursor(page.data.at(-1).id)}>
-            Next
-          </button>
+        {page && (cursor || page.has_more) && (
+          <div className="table-foot">
+            <span>{page.data.length} shown</span>
+            <span className="row">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={!cursor}
+                onClick={() => setCursor(null)}
+              >
+                <ChevronLeft size={14} aria-hidden="true" />
+                First page
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={!page.has_more}
+                onClick={() => setCursor(page.data.at(-1).id)}
+              >
+                Next
+                <ChevronRight size={14} aria-hidden="true" />
+              </button>
+            </span>
+          </div>
         )}
       </div>
     </>

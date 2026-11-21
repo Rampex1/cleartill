@@ -8,13 +8,16 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import cards, checkout, forms, network
+from app import cards, checkout, config, forms, network, ratelimit
+from app.auth import require_dashboard_header
 from app.db import get_db
 from app.errors import ApiError
 from app.executor import Result, execute
-from app.models import CheckoutSession, PaymentIntent, PaymentMethod
+from app.merchants import create_merchant
+from app.models import CheckoutSession, Merchant, PaymentIntent, PaymentMethod
 from app.payment_intents import approve, confirm_pi, decline, require_status
 from app.routers.payment_methods import CardParams
 
@@ -168,3 +171,46 @@ def pay_session(cs_id: str, request: Request, db: Db, params: Params):
         return {"redirect": checkout.success_redirect(cs)}
 
     return execute(db, request, None, params, handler, hash_params={})
+
+
+# --- landing-page demo ----------------------------------------------------------------------
+
+DEMO_EMAIL = "demo-store@cleartill.test"
+DEMO_ITEMS = [  # $30.00, the amount every demo and test talks about
+    {"name": "Field notebook", "quantity": 1, "unit_amount": 1800, "amount_total": 1800},
+    {"name": "Brass pen", "quantity": 1, "unit_amount": 1200, "amount_total": 1200},
+]
+DEMO_PER_MINUTE = 20
+
+
+def _demo_merchant_id(db: Session) -> str:
+    found = db.scalar(select(Merchant.id).where(Merchant.email == DEMO_EMAIL))
+    if found:
+        return found
+    try:
+        with db.begin_nested():  # a concurrent first demo may create it first
+            return create_merchant(db, DEMO_EMAIL)[0].id
+    except IntegrityError:
+        return db.scalar(select(Merchant.id).where(Merchant.email == DEMO_EMAIL))
+
+
+@router.post("/demo", dependencies=[Depends(require_dashboard_header)])
+def create_demo_checkout(request: Request, db: Db, params: Params):
+    """A fresh checkout session from the built-in demo store, so a visitor can pay one
+    without an account. Rate limited per client IP; the header blocks cross-site posts."""
+    ratelimit.check("demo", ratelimit.client_ip(request), limit=DEMO_PER_MINUTE)
+
+    def handler():
+        forms.validate(forms.NoParams, params)
+        base = config.public_base_url()
+        cs = checkout.create_session(
+            db,
+            _demo_merchant_id(db),
+            [dict(item) for item in DEMO_ITEMS],
+            success_url=f"{base}/demo/thanks?session={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{base}/",
+            request=request,
+        )
+        return {"url": checkout.session_json(cs)["url"]}
+
+    return execute(db, request, None, params, handler)

@@ -1,7 +1,8 @@
+import { ChevronLeft, ChevronRight, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { EmptyState, SkeletonRows, when } from "../ui.jsx";
 import { dashGet, errorMessage } from "./dash.js";
-import { date } from "./Payments.jsx";
 
 export default function Customers() {
   const [cursor, setCursor] = useState(null);
@@ -25,47 +26,75 @@ export default function Customers() {
 
   return (
     <>
-      <h1>Customers</h1>
+      <div className="page-head">
+        <div>
+          <h1>Customers</h1>
+          <p>People and businesses you&apos;ve charged or saved.</p>
+        </div>
+      </div>
       {error && (
-        <p className="error" role="alert">
+        <p className="alert" role="alert">
           {error}
         </p>
       )}
-      {page && page.data.length === 0 && <p>No customers yet.</p>}
-      {page && page.data.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Customer</th>
-              <th>Email</th>
-              <th>Name</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {page.data.map((c) => (
-              <tr key={c.id}>
-                <td>
-                  <code>{c.id}</code>
-                </td>
-                <td>{c.email ?? "—"}</td>
-                <td>{c.name ?? "—"}</td>
-                <td>{date(c.created)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <div className="row">
-        {cursor && (
-          <button type="button" className="secondary" onClick={() => setCursor(null)}>
-            First page
-          </button>
+      <div className="panel">
+        {page && page.data.length === 0 ? (
+          <EmptyState icon={Users} title="No customers yet">
+            Create one with <code>POST /v1/customers</code> and attach it to payments to see their
+            history in one place.
+          </EmptyState>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Customer</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              {page ? (
+                <tbody>
+                  {page.data.map((c) => (
+                    <tr key={c.id}>
+                      <td className="strong">{c.name ?? "—"}</td>
+                      <td>{c.email ?? "—"}</td>
+                      <td className="id">{c.id}</td>
+                      <td className="muted">{when(c.created)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              ) : (
+                <SkeletonRows columns={4} />
+              )}
+            </table>
+          </div>
         )}
-        {page?.has_more && (
-          <button type="button" onClick={() => setCursor(page.data.at(-1).id)}>
-            Next
-          </button>
+        {page && (cursor || page.has_more) && (
+          <div className="table-foot">
+            <span>{page.data.length} shown</span>
+            <span className="row">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={!cursor}
+                onClick={() => setCursor(null)}
+              >
+                <ChevronLeft size={14} aria-hidden="true" />
+                First page
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={!page.has_more}
+                onClick={() => setCursor(page.data.at(-1).id)}
+              >
+                Next
+                <ChevronRight size={14} aria-hidden="true" />
+              </button>
+            </span>
+          </div>
         )}
       </div>
     </>

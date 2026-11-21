@@ -1,12 +1,14 @@
+import { AlertCircle, ArrowUpRight, Banknote, Landmark } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import { money } from "../api.js";
+import { EmptyState, Money, Spinner, StateBadge, when } from "../ui.jsx";
 import { dashGet, dashPost, errorMessage, useIdempotencyKey } from "./dash.js";
-import { date } from "./Payments.jsx";
 
 function total(list) {
-  return list.map((b) => money(b.amount, b.currency)).join(", ") || money(0, "usd");
+  return list.reduce((sum, b) => sum + (b.currency === "usd" ? b.amount : 0), 0);
 }
+
+const TXN_TYPE = { charge: "Charge", refund: "Refund", payout: "Payout" };
 
 export default function Balance() {
   const [balance, setBalance] = useState(null);
@@ -53,81 +55,165 @@ export default function Balance() {
     setBusy(false);
   }
 
+  const inTransit = (payouts ?? [])
+    .filter((p) => p.status === "pending")
+    .reduce((sum, p) => sum + p.amount, 0);
+
   return (
     <>
-      <h1>Balance</h1>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      {balance && (
-        <dl className="facts">
-          <dt>Available</dt>
-          <dd>{total(balance.available)}</dd>
-          <dt>Pending</dt>
-          <dd>{total(balance.pending)}</dd>
+      <div className="page-head">
+        <div>
+          <h1>Balance</h1>
+          <p>Funds settle into pending, become available, then pay out to your bank.</p>
+        </div>
+      </div>
+
+      <section className="panel">
+        <dl className="summary">
+          <div>
+            <dt>Available</dt>
+            <dd className="money-display-wrap">
+              {balance ? <Money amount={total(balance.available)} display /> : <span className="skeleton" />}
+            </dd>
+            <dd className="summary-note">
+              {balance && total(balance.available) < 0
+                ? "Refunds exceed available funds; new captures cover it"
+                : "Ready to pay out"}
+            </dd>
+          </div>
+          <div>
+            <dt>Pending</dt>
+            <dd className="money-display-wrap">
+              {balance ? <Money amount={total(balance.pending)} display /> : <span className="skeleton" />}
+            </dd>
+            <dd className="summary-note">Captured, not yet released</dd>
+          </div>
+          <div>
+            <dt>In transit</dt>
+            <dd className="money-display-wrap">
+              {payouts ? <Money amount={inTransit} display /> : <span className="skeleton" />}
+            </dd>
+            <dd className="summary-note">Payouts on their way to your bank</dd>
+          </div>
         </dl>
-      )}
-      <form onSubmit={payOut} className="row refund">
-        <label>
-          Payout amount (cents)
-          <input name="amount" inputMode="numeric" required />
-        </label>
-        <button type="submit" disabled={busy}>
-          Pay out
-        </button>
-      </form>
-      <h2>Payouts</h2>
-      {payouts && payouts.length === 0 && <p>No payouts yet.</p>}
-      {payouts && payouts.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Amount</th>
-              <th>Status</th>
-              <th>Arrives</th>
-            </tr>
-          </thead>
-          <tbody>
-            {payouts.map((p) => (
-              <tr key={p.id}>
-                <td>{money(p.amount, p.currency)}</td>
-                <td>{p.status}</td>
-                <td>{date(p.arrival_date)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <h2>Balance transactions</h2>
-      {txns && txns.length === 0 && <p>No balance transactions yet.</p>}
-      {txns && txns.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Amount</th>
-              <th>Fee</th>
-              <th>Net</th>
-              <th>Status</th>
-              <th>Available on</th>
-            </tr>
-          </thead>
-          <tbody>
-            {txns.map((t) => (
-              <tr key={t.id}>
-                <td>{t.type}</td>
-                <td>{money(t.amount, t.currency)}</td>
-                <td>{money(t.fee, t.currency)}</td>
-                <td>{money(t.net, t.currency)}</td>
-                <td>{t.status}</td>
-                <td>{date(t.available_on)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+        <form onSubmit={payOut} className="payout-form">
+          <label className="field">
+            Payout amount (cents)
+            <input className="input" name="amount" inputMode="numeric" placeholder="e.g. 500" required />
+          </label>
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            {busy ? <Spinner /> : <Landmark size={15} aria-hidden="true" />}
+            Pay out
+          </button>
+          {error && (
+            <p className="alert payout-error" role="alert">
+              <AlertCircle size={16} aria-hidden="true" />
+              {error}
+            </p>
+          )}
+        </form>
+      </section>
+
+      <div className="stack balance-tables">
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Payouts</h2>
+            <p>Sent to the simulated bank</p>
+          </div>
+          {payouts && payouts.length === 0 ? (
+            <EmptyState icon={Landmark} title="No payouts yet">
+              Once funds are available, pay them out above. They arrive after the availability
+              delay.
+            </EmptyState>
+          ) : (
+            <div className="table-wrap">
+              <table className="table table-labelled">
+                <thead>
+                  <tr>
+                    <th className="num">Amount</th>
+                    <th>Status</th>
+                    <th>Arrives</th>
+                    <th>Payout</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(payouts ?? []).map((p) => (
+                    <tr key={p.id}>
+                      <td className="num strong" data-label="Amount">
+                        <Money amount={p.amount} currency={p.currency} />
+                      </td>
+                      <td data-label="Status">
+                        <StateBadge state={p.status} />
+                      </td>
+                      <td className="muted" data-label="Arrives">{when(p.arrival_date)}</td>
+                      <td className="id" data-label="Payout">{p.id}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Balance transactions</h2>
+            <p>Every movement, with fees and net</p>
+          </div>
+          {txns && txns.length === 0 ? (
+            <EmptyState icon={Banknote} title="Nothing has moved yet">
+              Captures, refunds and payouts each create a balance transaction here.
+            </EmptyState>
+          ) : (
+            <div className="table-wrap">
+              <table className="table table-labelled">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th className="num">Amount</th>
+                    <th className="num">Fee</th>
+                    <th className="num">Net</th>
+                    <th>Status</th>
+                    <th>Available on</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(txns ?? []).map((t) => (
+                    <tr key={t.id}>
+                      <td className="strong" data-label="Type">
+                        <span className="row">
+                          <ArrowUpRight
+                            size={14}
+                            aria-hidden="true"
+                            className={t.amount < 0 ? "flow-out" : "flow-in"}
+                          />
+                          <span className="visually-hidden">{t.type}</span>
+                          <span aria-hidden="true">{TXN_TYPE[t.type] ?? t.type}</span>
+                        </span>
+                      </td>
+                      <td className="num" data-label="Amount">
+                        <Money amount={t.amount} currency={t.currency} />
+                      </td>
+                      <td className="num muted" data-label="Fee">
+                        <Money amount={t.fee} currency={t.currency} />
+                      </td>
+                      <td className="num strong" data-label="Net">
+                        <Money amount={t.net} currency={t.currency} />
+                      </td>
+                      <td data-label="Status">
+                        <StateBadge state={t.status} />
+                      </td>
+                      <td className="muted" data-label="Available on">
+                        {when(t.available_on)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
     </>
   );
 }

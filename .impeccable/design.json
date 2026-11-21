@@ -1,0 +1,502 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-21T16:16:43.112222+00:00",
+  "title": "Design System: Cleartill",
+  "extensions": {
+    "colorMeta": {
+      "till-teal": {
+        "role": "primary",
+        "displayName": "Till Teal",
+        "canonical": "#0d6b63",
+        "tonalRamp": [
+          "#04201e",
+          "#063632",
+          "#094b45",
+          "#0d6b63",
+          "#569792",
+          "#92bcb9",
+          "#c2dad8",
+          "#e7f0ef"
+        ]
+      },
+      "till-teal-weak": {
+        "role": "primary",
+        "displayName": "Teal Wash",
+        "canonical": "#e3f0ee",
+        "tonalRamp": [
+          "#444847",
+          "#727877",
+          "#9fa8a7",
+          "#e3f0ee",
+          "#ebf4f3",
+          "#f2f8f7",
+          "#f8fbfb",
+          "#fcfefd"
+        ]
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "Ledger Ground",
+        "canonical": "#f6f7f6",
+        "tonalRamp": [
+          "#4a4a4a",
+          "#7b7c7b",
+          "#acadac",
+          "#f6f7f6",
+          "#f9f9f9",
+          "#fbfbfb",
+          "#fdfdfd",
+          "#fefefe"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Panel White",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#4d4d4d",
+          "#808080",
+          "#b2b2b2",
+          "#ffffff",
+          "#ffffff",
+          "#ffffff",
+          "#ffffff",
+          "#ffffff"
+        ]
+      },
+      "surface-rail": {
+        "role": "neutral",
+        "displayName": "Rail Grey",
+        "canonical": "#f0f2f1",
+        "tonalRamp": [
+          "#484948",
+          "#787978",
+          "#a8a9a9",
+          "#f0f2f1",
+          "#f4f6f5",
+          "#f8f9f9",
+          "#fbfcfc",
+          "#fefefe"
+        ]
+      },
+      "sunken": {
+        "role": "neutral",
+        "displayName": "Sunken",
+        "canonical": "#f3f5f4",
+        "tonalRamp": [
+          "#494a49",
+          "#7a7a7a",
+          "#aaacab",
+          "#f3f5f4",
+          "#f7f8f7",
+          "#fafafa",
+          "#fcfcfc",
+          "#fefefe"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#14201c",
+        "tonalRamp": [
+          "#060a08",
+          "#0a100e",
+          "#0e1614",
+          "#14201c",
+          "#5a6360",
+          "#959b99",
+          "#c4c7c6",
+          "#e8e9e8"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Ink 2",
+        "canonical": "#33403b",
+        "tonalRamp": [
+          "#0f1312",
+          "#1a201e",
+          "#242d29",
+          "#33403b",
+          "#707976",
+          "#a3a9a7",
+          "#cccfce",
+          "#ebeceb"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "canonical": "#5d6965",
+        "tonalRamp": [
+          "#1c201e",
+          "#2e3432",
+          "#414a47",
+          "#5d6965",
+          "#8e9693",
+          "#b6bcba",
+          "#d6dad8",
+          "#eff0f0"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#e2e6e4",
+        "tonalRamp": [
+          "#444544",
+          "#717372",
+          "#9ea1a0",
+          "#e2e6e4",
+          "#ebeeec",
+          "#f2f4f3",
+          "#f8f9f8",
+          "#fcfcfc"
+        ]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Strong Hairline",
+        "canonical": "#cdd4d1",
+        "tonalRamp": [
+          "#3e403f",
+          "#666a68",
+          "#909492",
+          "#cdd4d1",
+          "#dce1df",
+          "#e8ecea",
+          "#f2f4f4",
+          "#fafbfa"
+        ]
+      },
+      "success": {
+        "role": "status",
+        "displayName": "Success",
+        "canonical": "#1d7a4e",
+        "tonalRamp": [
+          "#092517",
+          "#0e3d27",
+          "#145537",
+          "#1d7a4e",
+          "#61a283",
+          "#99c3af",
+          "#c6ded3",
+          "#e8f2ed"
+        ]
+      },
+      "warning": {
+        "role": "status",
+        "displayName": "Warning",
+        "canonical": "#8f5600",
+        "tonalRamp": [
+          "#2b1a00",
+          "#482b00",
+          "#643c00",
+          "#8f5600",
+          "#b1894c",
+          "#cdb38c",
+          "#e3d5bf",
+          "#f4eee6"
+        ]
+      },
+      "danger": {
+        "role": "status",
+        "displayName": "Danger",
+        "canonical": "#b0281f",
+        "tonalRamp": [
+          "#350c09",
+          "#581410",
+          "#7b1c16",
+          "#b0281f",
+          "#c86862",
+          "#db9e9a",
+          "#ebc9c7",
+          "#f7eae9"
+        ]
+      },
+      "info": {
+        "role": "status",
+        "displayName": "Info",
+        "canonical": "#2c5cb0",
+        "tonalRamp": [
+          "#0d1c35",
+          "#162e58",
+          "#1f407b",
+          "#2c5cb0",
+          "#6b8dc8",
+          "#a0b6db",
+          "#cad6eb",
+          "#eaeff7"
+        ]
+      },
+      "neutral": {
+        "role": "status",
+        "displayName": "Neutral",
+        "canonical": "#4c5853",
+        "tonalRamp": [
+          "#171a19",
+          "#262c2a",
+          "#353e3a",
+          "#4c5853",
+          "#828a87",
+          "#aeb4b2",
+          "#d2d5d4",
+          "#edeeee"
+        ]
+      },
+      "test-mode-bg": {
+        "role": "status",
+        "displayName": "Test-mode Amber",
+        "canonical": "#fff5dc",
+        "tonalRamp": [
+          "#4d4a42",
+          "#807a6e",
+          "#b2ac9a",
+          "#fff5dc",
+          "#fff8e6",
+          "#fffaef",
+          "#fffcf6",
+          "#fffefc"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Landing hero headline only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Landing section heads."
+      },
+      "money-display": {
+        "displayName": "Money Display",
+        "purpose": "The statement figure: payment detail, balance, checkout total, example record."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Dashboard page h1."
+      },
+      "title-sm": {
+        "displayName": "Title Sm",
+        "purpose": "Panel heads."
+      },
+      "body-lg": {
+        "displayName": "Body Lg",
+        "purpose": "Hero lede and section intros."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default UI text."
+      },
+      "body-sm": {
+        "displayName": "Body Sm",
+        "purpose": "Tables, nav, alerts."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Table headers, badges, field labels."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Ids, event types, card numbers, code."
+      }
+    },
+    "shadows": [
+      {
+        "name": "rest",
+        "value": "0 1px 2px rgb(20 32 28 / 6%), 0 1px 1px rgb(20 32 28 / 4%)",
+        "purpose": "Panels, secondary buttons, active nav pill, proof cards."
+      },
+      {
+        "name": "raised",
+        "value": "0 10px 28px -12px rgb(20 32 28 / 22%), 0 2px 6px rgb(20 32 28 / 6%)",
+        "purpose": "Centered cards (3DS, confirmation)."
+      },
+      {
+        "name": "showcase",
+        "value": "0 24px 60px -24px rgb(20 32 28 / 30%), 0 4px 12px rgb(20 32 28 / 7%)",
+        "purpose": "Landing example record only."
+      },
+      {
+        "name": "focus",
+        "value": "0 0 0 3px rgb(13 107 99 / 24%)",
+        "purpose": "Keyboard focus ring on buttons and inputs."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "All state transitions."
+      },
+      {
+        "name": "duration-state",
+        "value": "150ms",
+        "purpose": "Button, input and nav colour/border/shadow changes (table rows 120ms, disclosure chevron 180ms)."
+      },
+      {
+        "name": "spinner",
+        "value": "700ms linear infinite",
+        "purpose": "Busy buttons."
+      },
+      {
+        "name": "shimmer",
+        "value": "1.4s ease-in-out infinite",
+        "purpose": "Skeleton rows."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "1ms",
+        "purpose": "All animation and transition durations under prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "stack-tables",
+        "value": "640px"
+      },
+      {
+        "name": "sidebar-to-topbar",
+        "value": "820px"
+      },
+      {
+        "name": "single-column",
+        "value": "960px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one teal action per region.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Capture</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 14px;border:1px solid transparent;border-radius:8px;font:550 13.5px/1 'Inter Variable',Inter,system-ui,sans-serif;cursor:pointer;transition:background-color 150ms cubic-bezier(0.16,1,0.3,1),border-color 150ms cubic-bezier(0.16,1,0.3,1),box-shadow 150ms cubic-bezier(0.16,1,0.3,1)}.ds-btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgb(13 107 99 / 24%)}.ds-btn-primary{background:#0d6b63;color:#fff;box-shadow:0 1px 2px rgb(20 32 28 / 6%),0 1px 1px rgb(20 32 28 / 4%),inset 0 1px 0 rgb(255 255 255 / 12%)}.ds-btn-primary:hover{background:#0a5952}.ds-btn-primary:active{background:#084a44}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "White outlined companion action.",
+      "html": "<button class=\"ds-btn ds-btn-secondary\">Refund</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 14px;border:1px solid transparent;border-radius:8px;font:550 13.5px/1 'Inter Variable',Inter,system-ui,sans-serif;cursor:pointer;transition:background-color 150ms cubic-bezier(0.16,1,0.3,1),border-color 150ms cubic-bezier(0.16,1,0.3,1),box-shadow 150ms cubic-bezier(0.16,1,0.3,1)}.ds-btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgb(13 107 99 / 24%)}.ds-btn-secondary{background:#fff;border-color:#cdd4d1;color:#14201c;box-shadow:0 1px 2px rgb(20 32 28 / 6%),0 1px 1px rgb(20 32 28 / 4%)}.ds-btn-secondary:hover{background:#f3f5f4;border-color:#bcc5c1}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Low-emphasis action in nav and sidebars.",
+      "html": "<button class=\"ds-btn ds-btn-ghost\">Log in</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 14px;border:1px solid transparent;border-radius:8px;font:550 13.5px/1 'Inter Variable',Inter,system-ui,sans-serif;cursor:pointer;transition:background-color 150ms cubic-bezier(0.16,1,0.3,1),border-color 150ms cubic-bezier(0.16,1,0.3,1),box-shadow 150ms cubic-bezier(0.16,1,0.3,1)}.ds-btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgb(13 107 99 / 24%)}.ds-btn-ghost{background:transparent;color:#33403b}.ds-btn-ghost:hover{background:#eceff0;color:#14201c}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labelled 38px field with teal focus ring.",
+      "html": "<label class=\"ds-field\">Refund amount (cents)<input class=\"ds-input\" placeholder=\"Blank refunds all $36.00\"></label>",
+      "css": ".ds-field{display:grid;gap:6px;font:550 13px 'Inter Variable',Inter,system-ui,sans-serif;color:#33403b}.ds-input{height:38px;padding:0 12px;border:1px solid #cdd4d1;border-radius:8px;background:#fff;color:#14201c;font:400 14px 'Inter Variable',Inter,system-ui,sans-serif;font-variant-numeric:tabular-nums;box-shadow:inset 0 1px 1px rgb(20 32 28 / 3%);transition:border-color 150ms,box-shadow 150ms}.ds-input::placeholder{color:#7b8681}.ds-input:hover{border-color:#b9c2be}.ds-input:focus{outline:none;border-color:#0d6b63;box-shadow:0 0 0 3px rgb(13 107 99 / 24%)}"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge-success",
+      "description": "Glyph plus word in a tinted pill.",
+      "html": "<span class=\"ds-badge ds-badge-success\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/></svg>Succeeded</span> <span class=\"ds-badge ds-badge-info\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 6v6l4 2\"/></svg>Uncaptured</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px 0 7px;border-radius:999px;font:550 12px/1 'Inter Variable',Inter,system-ui,sans-serif;white-space:nowrap}.ds-badge-success{background:#e5f3eb;color:#1d7a4e}.ds-badge-info{background:#e7edf9;color:#2c5cb0}"
+    },
+    {
+      "name": "Sidebar Nav",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Rail Grey sidebar; active item is a white pill with a teal icon.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-a ds-active\" href=\"#\">Payments</a><a class=\"ds-nav-a\" href=\"#\">Customers</a><a class=\"ds-nav-a\" href=\"#\">Balance</a></nav>",
+      "css": ".ds-nav{display:grid;gap:2px;width:212px;padding:12px;background:#f0f2f1}.ds-nav-a{display:flex;align-items:center;height:34px;padding:0 10px;border-radius:8px;color:#33403b;font:500 13.5px 'Inter Variable',Inter,system-ui,sans-serif;text-decoration:none;transition:background-color 150ms,color 150ms}.ds-nav-a:hover{background:rgb(20 32 28 / 5%);color:#14201c}.ds-nav-a:focus-visible{outline:2px solid #0d6b63;outline-offset:2px}.ds-active{background:#fff;color:#14201c;font-weight:600;box-shadow:0 1px 2px rgb(20 32 28 / 6%),0 1px 1px rgb(20 32 28 / 4%)}"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "White hairline panel with head and body.",
+      "html": "<section class=\"ds-panel\"><div class=\"ds-panel-head\"><h2>Details</h2></div><div class=\"ds-panel-body\">Capture method: Manual</div></section>",
+      "css": ".ds-panel{background:#fff;border:1px solid #e2e6e4;border-radius:12px;box-shadow:0 1px 2px rgb(20 32 28 / 6%),0 1px 1px rgb(20 32 28 / 4%);font:400 14px/1.5 'Inter Variable',Inter,system-ui,sans-serif;color:#33403b}.ds-panel-head{min-height:52px;display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid #e2e6e4}.ds-panel-head h2{margin:0;font:650 16px/1.35 'Schibsted Grotesk Variable','Inter Variable',sans-serif;letter-spacing:-0.015em;color:#14201c}.ds-panel-body{padding:20px}"
+    },
+    {
+      "name": "Statement Money",
+      "kind": "custom",
+      "refersTo": "money-display",
+      "description": "Dollars dominant, cents subordinate; text content stays the plain amount.",
+      "html": "<span class=\"ds-money\"><span>$48</span><span class=\"ds-minor\">.00</span><span class=\"ds-cur\">usd</span></span>",
+      "css": ".ds-money{font:650 32px/1.1 'Schibsted Grotesk Variable','Inter Variable',sans-serif;letter-spacing:-0.025em;color:#14201c;font-variant-numeric:proportional-nums lining-nums;white-space:nowrap}.ds-minor{color:#5d6965;font-size:0.6em;font-weight:600;letter-spacing:-0.01em}.ds-cur{margin-left:6px;color:#5d6965;font-size:0.6em;font-weight:550;letter-spacing:0.04em;text-transform:uppercase;vertical-align:0.35em}"
+    },
+    {
+      "name": "Lifecycle Step",
+      "kind": "custom",
+      "refersTo": "",
+      "description": "Timeline dot, title, time and pinned ledger postings.",
+      "html": "<div class=\"ds-step\"><span class=\"ds-dot\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/></svg></span><div><div class=\"ds-title\"><strong>Captured</strong><time>Nov 21, 11:09 AM</time></div><table class=\"ds-ledger\"><tr><th>Account</th><th>Debit</th><th>Credit</th></tr><tr><td>Card network clearing</td><td>$48.00</td><td></td></tr><tr><td>Pending balance</td><td></td><td>$46.31</td></tr></table></div></div>",
+      "css": ".ds-step{display:grid;grid-template-columns:28px 1fr;gap:14px;font:400 13.5px 'Inter Variable',Inter,system-ui,sans-serif;color:#33403b}.ds-dot{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#e5f3eb;color:#1d7a4e}.ds-title{display:flex;justify-content:space-between;padding-top:4px;color:#14201c}.ds-title time{color:#5d6965;font-size:12.5px;font-variant-numeric:tabular-nums}.ds-ledger{width:100%;margin-top:10px;border:1px solid #e2e6e4;border-radius:8px;border-collapse:separate;border-spacing:0;font-size:12.5px;font-variant-numeric:tabular-nums}.ds-ledger th{background:#f3f5f4;color:#5d6965;font-weight:500;font-size:11.5px;text-align:left;padding:6px 12px}.ds-ledger td{padding:6px 12px;border-top:1px solid #edf0ee}.ds-ledger td+td,.ds-ledger th+th{text-align:right}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Clear Statement",
+    "overview": "Cleartill is the category standard for a payments product, executed at full craft: a light, faintly green-grey ground, white panels with hairline borders, one teal that only ever means \"you can act here\", and money set like a bank statement. The amount is the loudest thing on every screen. Everything else (labels, ids, timestamps, chrome) steps back into muted ink so the figure and its state read instantly.\n\nThe system is conventional on purpose. Density is calm rather than packed: 14px body on a 4/8px rhythm, 48px table rows, 20px panel padding, generous page margins (32px 40px on the dashboard, 88px section bands on the landing). Depth comes from soft, low offset shadows on panels and a single lifted shadow on the showcase record. The machinery (lifecycle rail, ledger postings, delivery logs, ids in mono) is shown plainly, as a feature, not hidden behind summaries.\n\nIt must never read as Stripe (no gradient hero, no purple, no borrowed marks) and it rejects the generic SaaS template: no glassy cards, no icon-tile feature rows. It runs under a strict CSP, so every asset is a same-origin file.",
+    "keyCharacteristics": [
+      "Light green-grey neutrals; white panels on a #f6f7f6 ground with 1px hairlines.",
+      "One teal (#0d6b63) for actions, selection and focus.",
+      "Statement money: dollars dominant, cents subordinate, tabular figures in tables.",
+      "Status as glyph plus word in soft tinted pills.",
+      "Schibsted Grotesk headings over Inter UI text, JetBrains Mono for ids and code.",
+      "Payment lifecycle rail with ledger postings pinned under each step.",
+      "Test mode always visible in an amber banner on every page."
+    ],
+    "rules": [
+      {
+        "name": "The One Teal Rule",
+        "body": "Teal is reserved for actions, selection and focus (plus the logo mark and teal-wash notices). It never colours a heading, a figure, a chart fill or a decorative surface.",
+        "section": "colors"
+      },
+      {
+        "name": "The Glyph-and-Word Rule",
+        "body": "Status is never colour alone: every badge and timeline dot carries a lucide glyph (13–14px, stroke 2.25) and a word.",
+        "section": "colors"
+      },
+      {
+        "name": "The Statement Figure Rule",
+        "body": "Money renders through the Money component: the major part (symbol and dollars) at full size in Ink, the decimal and cents in Muted (and at 0.6em, weight 600, in the display size), an optional uppercase currency code at 0.6em raised 0.35em. The element's text content stays the plain formatted amount (\"$48.00\") so copy, search and screen readers read it normally.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Figures in tables, ledgers, inputs and timestamps use tabular numerals and right-align in numeric columns; only the display figure switches to proportional lining numerals.",
+        "section": "typography"
+      },
+      {
+        "name": "The Hairline-First Rule",
+        "body": "Every container has a 1px Hairline border; the shadow only softens it. Shadows never replace borders.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** render every amount with the Money component so dollars lead, cents recede and the text content stays the plain formatted amount.",
+      "**Do** keep Till Teal (#0d6b63) for actions, selection and focus only.",
+      "**Do** pair every status colour with a glyph and a word.",
+      "**Do** give every surface a 1px Hairline border and, at most, the Rest shadow; reserve Showcase for the landing record.",
+      "**Do** ship every font and image as a same-origin file: fontsource packages, `assetsInlineLimit: 0`, no inline `style` attributes or scripts.",
+      "**Do** keep the accessible names the e2e tests pin (labels, buttons, headings, nav links, `role=\"alert\"`, `role=\"status\"`) when restyling.",
+      "**Do** keep the test-mode banner on every page.",
+      "**Do** set ids, event types, card numbers and code in JetBrains Mono."
+    ],
+    "donts": [
+      "**Don't** use teal for headings, figures, illustration or decorative fills.",
+      "**Don't** show a state by colour alone.",
+      "**Don't** split an amount into separate text nodes that read differently to a screen reader, or replace it with an image.",
+      "**Don't** load fonts, scripts or images from a CDN, use `data:` URIs, or write inline styles; the CSP blocks them.",
+      "**Don't** borrow Stripe's look, purple, gradients or marks.",
+      "**Don't** use gradient heroes, glassy cards or icon-tile feature rows.",
+      "**Don't** use hard, zero-blur offset shadows."
+    ]
+  }
+}

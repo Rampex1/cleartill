@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, BeforeValidator, ConfigDict, StringConstraints
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -17,8 +17,15 @@ from app.executor import execute
 from app.merchants import create_merchant, new_api_key, normalize_email
 from app.models import (
     ApiKey,
+    BalanceTransaction,
+    Charge,
     Event,
+    JournalEntry,
+    JournalTransaction,
+    LedgerAccount,
     Merchant,
+    PaymentIntent,
+    Refund,
     WebhookAttempt,
     WebhookDelivery,
     WebhookEndpoint,
@@ -311,4 +318,77 @@ def resend_delivery(delivery_id: str, auth: SessionAuth, db: Db):
     return {
         "delivery": delivery_json(d, _event_type(db, d.event_id)),
         "attempt": attempt_json(attempt),
+    }
+
+
+# --- payment timeline (dashboard payment detail) --------------------------------------------
+
+
+@router.get("/payment_intents/{pi_id}/timeline")
+def payment_timeline(pi_id: str, auth: SessionAuth, db: Db):
+    """Every event about this payment and every journal transaction behind it, oldest first:
+    the payment detail page pins each posting to the step that caused it."""
+    pi = get_owned(db, PaymentIntent, pi_id, auth.merchant.id)
+    charge_ids = list(db.scalars(select(Charge.id).where(Charge.payment_intent_id == pi.id)))
+    refund_ids = list(db.scalars(select(Refund.id).where(Refund.payment_intent_id == pi.id)))
+    object_ids = [pi.id, *charge_ids, *refund_ids]
+    events = db.scalars(
+        select(Event)
+        .where(
+            Event.merchant_id == auth.merchant.id,
+            or_(
+                Event.data["object"]["id"].astext.in_(object_ids),
+                Event.data["object"]["payment_intent"].astext == pi.id,
+            ),
+        )
+        .order_by(Event.seq)
+    ).all()
+    # Captures and refunds post under the charge/refund id; releases under the capture's
+    # balance transaction id.
+    capture_bts = list(
+        db.scalars(
+            select(BalanceTransaction.id).where(
+                BalanceTransaction.merchant_id == auth.merchant.id,
+                BalanceTransaction.source_id.in_(charge_ids),
+            )
+        )
+    )
+    sources = [*charge_ids, *refund_ids, *capture_bts]
+    rows = db.execute(
+        select(JournalTransaction, JournalEntry, LedgerAccount)
+        .join(JournalEntry, JournalEntry.transaction_id == JournalTransaction.id)
+        .join(LedgerAccount, LedgerAccount.id == JournalEntry.account_id)
+        .where(
+            JournalTransaction.source_id.in_(sources),
+            or_(LedgerAccount.merchant_id == auth.merchant.id, LedgerAccount.merchant_id.is_(None)),
+        )
+        .order_by(JournalTransaction.created, JournalTransaction.id, JournalEntry.id)
+    ).all()
+    postings: dict[str, dict] = {}
+    for jtx, entry, account in rows:
+        posting = postings.setdefault(
+            jtx.id,
+            {
+                "id": jtx.id,
+                "type": jtx.type,
+                "source": jtx.source_id,
+                "created": _unix(jtx.created),
+                "entries": [],
+            },
+        )
+        posting["entries"].append(
+            {"account": account.kind, "amount": entry.amount, "currency": entry.currency}
+        )
+    return {
+        "events": [
+            {
+                "id": e.id,
+                "type": e.type,
+                "created": _unix(e.created),
+                # Events from one API request belong to one step of the payment's life.
+                "request": (e.request or {}).get("id"),
+            }
+            for e in events
+        ],
+        "postings": list(postings.values()),
     }
