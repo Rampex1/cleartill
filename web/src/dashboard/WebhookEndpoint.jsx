@@ -1,8 +1,9 @@
+import { AlertCircle, ArrowLeft, CheckCircle2, ChevronDown, ChevronRight, RefreshCw, Send } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
+import { EmptyState, SkeletonRows, Spinner, StateBadge, when } from "../ui.jsx";
 import { dashGet, dashPost, errorMessage } from "./dash.js";
-import { date } from "./Payments.jsx";
 
 function Attempts({ deliveryId }) {
   const [attempts, setAttempts] = useState(null);
@@ -14,18 +15,26 @@ function Attempts({ deliveryId }) {
     );
   }, [deliveryId]);
 
-  if (error) return <p className="error">{error}</p>;
-  if (!attempts) return <p>Loading…</p>;
-  if (attempts.length === 0) return <p>No attempts yet.</p>;
+  if (error) return <p className="muted-text">{error}</p>;
+  if (!attempts) return <span className="skeleton" />;
+  if (attempts.length === 0) return <p className="muted-text">No attempts yet.</p>;
   return (
-    <ul className="attempts">
+    <ol className="attempts">
       {attempts.map((a) => (
         <li key={a.id}>
-          {date(a.at)}: {a.status_code ?? a.error} in {a.duration_ms} ms
-          {a.manual ? " (manual)" : ""}
+          <time>{when(a.at)}</time>
+          {a.status_code ? (
+            <span className={`badge ${a.status_code < 300 ? "badge-success" : "badge-danger"}`}>
+              {a.status_code}
+            </span>
+          ) : (
+            <span className="badge badge-danger">{a.error}</span>
+          )}
+          <span className="muted-text">{a.duration_ms} ms</span>
+          <span className="attempt-kind">{a.manual ? "manual" : "automatic"}</span>
         </li>
       ))}
-    </ul>
+    </ol>
   );
 }
 
@@ -80,9 +89,12 @@ export default function WebhookEndpoint() {
     if (res.status === 200) {
       const a = res.body.attempt;
       const ok = a && a.status_code >= 200 && a.status_code < 300;
-      setNotice(
-        ok ? `Resent: ${a.status_code}` : `Resent: failed (${a?.status_code ?? a?.error ?? "unknown"})`,
-      );
+      setNotice({
+        ok,
+        text: ok
+          ? `Resent: ${a.status_code}`
+          : `Resent: failed (${a?.status_code ?? a?.error ?? "unknown"})`,
+      });
     } else setError(errorMessage(res));
     setOpen(null); // collapse, so a reopened attempts list is fresh
     await load();
@@ -91,84 +103,126 @@ export default function WebhookEndpoint() {
 
   return (
     <>
-      <p>
-        <Link to="/dashboard/webhooks">← Webhooks</Link>
-      </p>
-      <h1>Webhook endpoint</h1>
-      {endpoint && !endpoint.deleted && (
-        <p>
-          <code>{endpoint.url}</code> ({endpoint.status})
-        </p>
-      )}
-      {endpoint?.deleted && <p>This endpoint has been deleted; its delivery log is kept.</p>}
-      {endpoint && !endpoint.deleted && endpoint.status !== "enabled" && (
-        <p>This endpoint is disabled; enable it to resend.</p>
-      )}
+      <nav className="crumbs" aria-label="Breadcrumb">
+        <Link to="/dashboard/webhooks">
+          <ArrowLeft size={14} aria-hidden="true" />
+          All endpoints
+        </Link>
+      </nav>
+      <div className="page-head">
+        <div>
+          <h1>Webhook endpoint</h1>
+          {endpoint && !endpoint.deleted && (
+            <p className="row endpoint-meta">
+              <code>{endpoint.url}</code>
+              <StateBadge state={endpoint.status} />
+            </p>
+          )}
+          {endpoint?.deleted && <p>This endpoint has been deleted; its delivery log is kept.</p>}
+          {endpoint && !endpoint.deleted && endpoint.status !== "enabled" && (
+            <p>This endpoint is disabled; enable it to resend.</p>
+          )}
+        </div>
+      </div>
+
       {notice && (
-        <p className="notice" role="status">
-          {notice}
+        <p className={notice.ok ? "notice" : "notice notice-warn"} role="status">
+          {notice.ok ? <CheckCircle2 size={16} aria-hidden="true" /> : <AlertCircle size={16} aria-hidden="true" />}
+          {notice.text}
         </p>
       )}
       {error && (
-        <p className="error" role="alert">
+        <p className="alert" role="alert">
+          <AlertCircle size={16} aria-hidden="true" />
           {error}
         </p>
       )}
-      {deliveries && deliveries.length === 0 && <p>No deliveries yet.</p>}
-      {deliveries && deliveries.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Event</th>
-              <th>Status</th>
-              <th>Attempts</th>
-              <th>Next attempt</th>
-              <th>
-                <span className="visually-hidden">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {deliveries.map((d) => (
-              <Fragment key={d.id}>
+
+      <section className="panel">
+        <div className="panel-head">
+          <h2>Deliveries</h2>
+          <p>Newest first · up to 100</p>
+        </div>
+        {deliveries && deliveries.length === 0 ? (
+          <EmptyState icon={Send} title="No deliveries yet">
+            Events created after this endpoint was added are delivered here.
+          </EmptyState>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
                 <tr>
-                  <td>{d.type}</td>
-                  <td>{d.status}</td>
-                  <td>{d.attempts}</td>
-                  <td>{d.status === "pending" ? date(d.next_attempt_at) : "—"}</td>
-                  <td className="row">
-                    <button
-                      type="button"
-                      className="secondary"
-                      aria-expanded={open === d.id}
-                      aria-controls={`attempts-${d.id}`}
-                      aria-label={`Attempts for ${d.type} ${d.id}`}
-                      onClick={() => setOpen(open === d.id ? null : d.id)}
-                    >
-                      Attempts
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Resend ${d.type} ${d.id}`}
-                      disabled={busy !== null || !canResend}
-                      onClick={() => resend(d)}
-                    >
-                      Resend
-                    </button>
-                  </td>
+                  <th>Event</th>
+                  <th>Status</th>
+                  <th className="num">Attempts</th>
+                  <th>Next attempt</th>
+                  <th>
+                    <span className="visually-hidden">Actions</span>
+                  </th>
                 </tr>
-                {open === d.id && (
-                  <tr id={`attempts-${d.id}`}>
-                    <td colSpan={5}>
-                      <Attempts deliveryId={d.id} />
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      )}
+              </thead>
+              {deliveries ? (
+                <tbody>
+                  {deliveries.map((d) => (
+                    <Fragment key={d.id}>
+                      <tr>
+                        <td>
+                          <code className="event-type">{d.type}</code>
+                        </td>
+                        <td>
+                          <StateBadge state={d.status} />
+                        </td>
+                        <td className="num">{d.attempts}</td>
+                        <td className="muted">
+                          {d.status === "pending" ? when(d.next_attempt_at) : "—"}
+                        </td>
+                        <td className="num">
+                          <span className="row row-actions">
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              aria-expanded={open === d.id}
+                              aria-controls={`attempts-${d.id}`}
+                              aria-label={`Attempts for ${d.type} ${d.id}`}
+                              onClick={() => setOpen(open === d.id ? null : d.id)}
+                            >
+                              {open === d.id ? (
+                                <ChevronDown size={14} aria-hidden="true" />
+                              ) : (
+                                <ChevronRight size={14} aria-hidden="true" />
+                              )}
+                              Attempts
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              aria-label={`Resend ${d.type} ${d.id}`}
+                              disabled={busy !== null || !canResend}
+                              onClick={() => resend(d)}
+                            >
+                              {busy === d.id ? <Spinner /> : <RefreshCw size={13} aria-hidden="true" />}
+                              Resend
+                            </button>
+                          </span>
+                        </td>
+                      </tr>
+                      {open === d.id && (
+                        <tr id={`attempts-${d.id}`} className="attempts-row">
+                          <td colSpan={5}>
+                            <Attempts deliveryId={d.id} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                </tbody>
+              ) : (
+                <SkeletonRows columns={5} rows={4} />
+              )}
+            </table>
+          </div>
+        )}
+      </section>
     </>
   );
 }
