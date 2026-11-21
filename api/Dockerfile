@@ -16,4 +16,4 @@ COPY api/ ./
 COPY --from=web /web/dist /app/web-dist
 RUN useradd --system app
 USER app
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log"]
+CMD ["/app/start.sh"]

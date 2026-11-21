@@ -9,8 +9,8 @@ services:
     region: ohio
     dockerfilePath: ./api/Dockerfile
     dockerContext: .
-    # Migrations run before the server starts; the worker runs in-process (no free workers).
-    dockerCommand: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log"
+    # start.sh migrates, then serves; the worker runs in-process (no free workers).
+    dockerCommand: /app/start.sh
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
