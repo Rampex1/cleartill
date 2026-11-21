@@ -225,13 +225,18 @@ def test_unknown_session_shows_invalid_link(page, base_url):
     expect(page.get_by_text("This checkout link is invalid.")).to_be_visible()
 
 
-def test_completed_session_url_forwards_to_success_url(page, base_url, new_session):
+def test_completed_session_url_shows_paid_instead_of_redirecting(page, base_url, new_session):
+    """A paid session's link must not be a redirector to the merchant's URL (M18 review #4):
+    it shows a confirmation with a link the customer chooses to follow."""
     _, cs = new_session()
     page.goto(cs["url"])
     fill_and_pay(page, VISA)
     page.wait_for_url(success_url(cs))
     page.goto(cs["url"])
-    page.wait_for_url(success_url(cs))
+    expect(page.get_by_text("Payment complete")).to_be_visible()
+    assert page.url == cs["url"]
+    link = page.get_by_role("link", name=re.compile("Continue to merchant.test"))
+    assert link.get_attribute("href") == success_url(cs)
 
 
 def test_3ds_fail_returns_to_checkout_with_alert_then_pays(page, base_url, new_session):

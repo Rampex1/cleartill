@@ -292,6 +292,7 @@ class Charge(Base):
             "amount_captured >= 0 AND amount_refunded >= 0 AND amount_refunded <= amount_captured",
             name="charges_amounts",
         ),
+        CheckConstraint("amount_captured <= amount", name="charges_captured_le_amount"),
     )
     object_name = "charge"
 

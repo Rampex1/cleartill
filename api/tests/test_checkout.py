@@ -1,13 +1,15 @@
 """M17: hosted checkout sessions (create/list/retrieve, public view, pay, 3DS, expiry, worker)."""
 
 import re
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
 from sqlalchemy import text
 
-from app import clock, ledger, seed, worker
+from app import checkout as checkout_mod
+from app import clock, housekeeping, ledger, seed
 from app.ledger_check import ledger_check
 
 FORM = {"Content-Type": "application/x-www-form-urlencoded"}
@@ -509,7 +511,9 @@ def test_3ds_approve_completes_session(client, skh):
     pid = cs["payment_intent"]
     r = challenge(client, pid, client_secret=secret, result="approve")
     assert r.status_code == 200, r.text
-    assert r.json() == {"redirect": f"https://testserver/checkout/{cs['id']}?payment_intent={pid}"}
+    # Approved and paid: straight to the merchant (user-approved change after M18 review #4).
+    success = cs["success_url"].replace("{CHECKOUT_SESSION_ID}", cs["id"])
+    assert r.json() == {"redirect": success}
     got = get_session(client, skh, cs["id"])
     assert (got["status"], got["payment_status"]) == ("complete", "paid")
     (e,) = events(client, skh, "checkout.session.completed")
@@ -648,25 +652,24 @@ def test_expire_second_run_is_noop(client, db, skh, monkeypatch):
 # --- worker ---------------------------------------------------------------------------------
 
 
-@pytest.fixture
-def expire_calls(monkeypatch):
+class _NoDb:
+    """A session factory whose sessions are useless: every real job fails (and is isolated)."""
+
+    @contextmanager
+    def begin(self):
+        yield None
+
+
+def test_housekeeping_runs_checkout_expiry(monkeypatch):
     calls = []
-    monkeypatch.setattr(worker, "_last_housekeeping", None)
-    monkeypatch.setattr(worker.housekeeping, "run_housekeeping", lambda *a, **k: {})
-    monkeypatch.setattr(worker.delivery, "deliver_one", lambda *a, **k: False)
-    monkeypatch.setattr(worker.checkout, "expire_sessions", lambda *a, **k: calls.append(a) or 0)
-    return calls
+    monkeypatch.setattr(checkout_mod, "expire_sessions", lambda db: calls.append(db) or 0)
+    results = housekeeping.run_housekeeping(_NoDb())
+    assert calls == [None]
+    assert results["expired_checkout_sessions"] == 0
 
 
-def test_tick_expires_sessions(expire_calls):
-    worker.tick(1000.0)
-    assert len(expire_calls) == 1
-
-
-def test_tick_expires_sessions_even_if_housekeeping_fails(monkeypatch, expire_calls):
-    def boom(*a, **k):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(worker.housekeeping, "run_housekeeping", boom)
-    worker.tick(1000.0)
-    assert len(expire_calls) == 1
+def test_checkout_expiry_runs_even_if_other_jobs_fail(monkeypatch):
+    calls = []
+    monkeypatch.setattr(checkout_mod, "expire_sessions", lambda db: calls.append(db) or 0)
+    results = housekeeping.run_housekeeping(_NoDb())  # the real jobs fail on a None session
+    assert results["released"] is None and calls == [None]

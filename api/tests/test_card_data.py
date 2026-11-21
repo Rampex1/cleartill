@@ -2,12 +2,14 @@
 
 import logging
 import re
+from datetime import UTC, datetime
 from urllib.parse import urlencode
 
 from sqlalchemy import text
 
 from app import seed
 
+FUTURE_YEAR = str(datetime.now(UTC).year + 5)  # not a fixed year: no time bomb
 FORM = {"Content-Type": "application/x-www-form-urlencoded"}
 TEST_CARDS = [
     "4242424242424242",
@@ -27,10 +29,10 @@ EXPIRED = "4000000000000002"
 def test_card_numbers_never_stored_logged_or_returned(client, db, caplog):
     caplog.set_level(logging.INFO)
     caplog.set_level(logging.INFO, logger="cleartill")
-    _, _, pk = seed.seed(db, "a@example.com")
+    merchant, _, pk = seed.seed(db, "a@example.com")
     h = {"Authorization": f"Bearer {pk}", **FORM}
 
-    def post(number, exp_year="2030"):
+    def post(number, exp_year=FUTURE_YEAR):
         cvc = "1234" if number.startswith(("34", "37")) else "123"
         content = urlencode(
             {
@@ -61,7 +63,11 @@ def test_card_numbers_never_stored_logged_or_returned(client, db, caplog):
         rows = db.execute(text(f'SELECT row_to_json(t)::text FROM "{t}" t')).scalars().all()
         dumps[t] = "\n".join(rows)
     assert "payment_methods" in dumps
-    assert dumps["payment_methods"].count('"sim_outcome"') == len(TEST_CARDS)
+    # Count this merchant's cards only: other tests may have committed rows table-wide.
+    saved = db.scalar(
+        text("SELECT count(*) FROM payment_methods WHERE merchant_id = :m"), {"m": merchant.id}
+    )
+    assert saved == len(TEST_CARDS)
 
     haystacks = {f"table {t}": d for t, d in dumps.items()}
     haystacks["logs"] = caplog.text

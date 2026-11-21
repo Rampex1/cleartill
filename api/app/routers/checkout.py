@@ -66,8 +66,10 @@ def three_ds(pi_id: str, request: Request, db: Db, params: Params):
             pi.client_secret.encode(), data.client_secret.encode()
         ):
             raise _not_found()
+        cs = None
         if pi.checkout_session_id is not None:  # lock order (§5.2): session before PI
-            checkout.require_open(checkout.lock_session(db, pi.checkout_session_id))
+            cs = checkout.lock_session(db, pi.checkout_session_id)
+            checkout.require_open(cs)
         pi = db.scalar(
             select(PaymentIntent)
             .where(PaymentIntent.id == pi_id)
@@ -101,6 +103,9 @@ def three_ds(pi_id: str, request: Request, db: Db, params: Params):
                 error_type="invalid_request_error",
                 message=AUTHENTICATION_FAILED,
             )
+        if cs is not None and cs.status == "complete":
+            # Straight to the merchant: the checkout page no longer forwards paid sessions.
+            return {"redirect": checkout.success_redirect(cs)}
         return {"redirect": _with_payment_intent(pi.return_url, pi.id)}
 
     return execute(db, request, None, params, handler)
