@@ -86,7 +86,9 @@ export default function Layout() {
               {merchant.email.charAt(0)}
             </span>
             <span className="account-meta">
-              <strong>Test account</strong>
+              <strong>
+                {merchant.email.endsWith("@sandbox.cleartill.test") ? "Demo account" : "Test account"}
+              </strong>
               <span>{merchant.email}</span>
             </span>
           </div>

@@ -1,10 +1,19 @@
-import { AlertCircle, ArrowRight, BookCheck, CheckCircle2, ShieldCheck, Webhook } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowRight,
+  BookCheck,
+  CheckCircle2,
+  PlayCircle,
+  ShieldCheck,
+  Webhook,
+} from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { ExampleRecord } from "../Home.jsx";
 import { Logo, Spinner } from "../ui.jsx";
 import { dashPost, errorMessage } from "./dash.js";
+import { useDemoAccount } from "./useDemoAccount.js";
 
 function Fields({ newPassword = false }) {
   return (
@@ -49,6 +58,34 @@ function Aside() {
       </ul>
       <ExampleRecord />
     </aside>
+  );
+}
+
+function DemoPath() {
+  const demo = useDemoAccount();
+  return (
+    <div className="demo-path">
+      <span className="divider">
+        <span>or</span>
+      </span>
+      <button
+        type="button"
+        className="btn btn-secondary btn-lg btn-block"
+        onClick={demo.start}
+        disabled={demo.busy}
+      >
+        {demo.busy ? <Spinner /> : <PlayCircle size={16} aria-hidden="true" />}
+        Explore a demo account
+      </button>
+      <p className="field-hint">
+        A ready-made account with two weeks of payments, refunds and payouts. No sign-up.
+      </p>
+      {demo.error && (
+        <p className="alert" role="alert">
+          {demo.error}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -109,6 +146,7 @@ export function Login() {
       <p className="auth-switch">
         New to Cleartill? <Link to="/dashboard/signup">Create an account</Link>
       </p>
+      <DemoPath />
     </Shell>
   );
 }
@@ -186,6 +224,7 @@ export function Signup() {
       <p className="auth-switch">
         Already have an account? <Link to="/dashboard/login">Log in instead</Link>
       </p>
+      <DemoPath />
     </Shell>
   );
 }

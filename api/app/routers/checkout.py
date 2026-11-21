@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import cards, checkout, config, forms, network, ratelimit
+from app import cards, checkout, config, forms, network, ratelimit, timeline
 from app.auth import require_dashboard_header
 from app.db import get_db
 from app.errors import ApiError
@@ -214,3 +214,24 @@ def create_demo_checkout(request: Request, db: Db, params: Params):
         return {"url": checkout.session_json(cs)["url"]}
 
     return execute(db, request, None, params, handler)
+
+
+@router.get("/demo/sessions/{cs_id}/payment")
+def demo_payment(cs_id: str, db: Db):
+    """The landing page's thanks screen: a paid demo-store payment's timeline and ledger
+    postings, read-only. Only for the demo store, and only once the session is complete."""
+    cs = db.get(CheckoutSession, cs_id)
+    merchant = db.get(Merchant, cs.merchant_id) if cs else None
+    if cs is None or merchant.email != DEMO_EMAIL or cs.status != "complete":
+        raise _session_not_found()
+    pi = db.get(PaymentIntent, cs.payment_intent_id)
+    return {
+        "payment": {
+            "id": pi.id,
+            "amount": pi.amount,
+            "currency": pi.currency,
+            "status": pi.status,
+            "created": int(pi.created.timestamp()),
+        },
+        **timeline.for_payment(db, merchant.id, pi),
+    }
