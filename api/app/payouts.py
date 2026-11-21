@@ -1,5 +1,7 @@
 """Manual payouts of the available balance to a simulated bank (design §5.16)."""
 
+import logging
+
 from fastapi import Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,6 +12,7 @@ from app.events import emit
 from app.ids import new_id
 from app.models import Payout
 
+log = logging.getLogger("cleartill.payouts")
 SETTLE_BATCH = 100
 
 
@@ -83,7 +86,11 @@ def pay_due_payouts(db: Session) -> int:
     ).all()
     paid = 0
     for payout in due:
-        if ledger.settle_payout(db, payout):
-            emit(db, payout.merchant_id, "payout.paid", payout_json(payout))
-            paid += 1
+        try:
+            with db.begin_nested():  # one bad payout is logged and skipped, not the batch
+                if ledger.settle_payout(db, payout):
+                    emit(db, payout.merchant_id, "payout.paid", payout_json(payout))
+                    paid += 1
+        except Exception:
+            log.exception("could not settle payout %s", payout.id)
     return paid

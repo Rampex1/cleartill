@@ -197,8 +197,13 @@ def post_refund(
 
 def lock_available(db: Session, merchant_id: str, currency: str) -> None:
     """Serialise payouts per merchant: lock the merchant_available account row before reading
-    the balance (design §5.16; the last entry in the §5.2 lock order). Refunds don't take it,
-    so a concurrent refund can still push available below zero afterwards (allowed)."""
+    the balance (design §5.16; the last entry in the §5.2 lock order).
+
+    FOR NO KEY UPDATE, not FOR UPDATE: every journal insert's FK check takes FOR KEY SHARE on
+    its account row, which FOR UPDATE would block (a release batch would time out payouts and
+    vice versa). Payouts still serialise against each other; postings to the account don't
+    wait. A payout may miss a release not yet committed (conservative), and a concurrent refund
+    can still push available below zero afterwards (allowed)."""
     db.execute(
         select(LedgerAccount.id)
         .where(
@@ -206,7 +211,7 @@ def lock_available(db: Session, merchant_id: str, currency: str) -> None:
             LedgerAccount.kind == "merchant_available",
             LedgerAccount.currency == currency,
         )
-        .with_for_update()
+        .with_for_update(key_share=True)
     )
 
 

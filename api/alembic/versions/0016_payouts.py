@@ -50,6 +50,21 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("payouts")
-    op.execute("DELETE FROM ledger_accounts WHERE id = 'la_platform_payouts_usd'")
-    op.drop_constraint("ledger_accounts_kind", "ledger_accounts", type_="check")
-    op.create_check_constraint("ledger_accounts_kind", "ledger_accounts", f"kind IN ({OLD_KINDS})")
+    # Journal entries are append-only, so once a payout has posted, its account can't be
+    # removed: keep the account and the wider kind constraint in that case (data first).
+    op.execute(
+        "DELETE FROM ledger_accounts WHERE id = 'la_platform_payouts_usd' AND NOT EXISTS "
+        "(SELECT 1 FROM journal_entries WHERE account_id = 'la_platform_payouts_usd')"
+    )
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM ledger_accounts WHERE kind = 'payouts_in_transit') THEN
+            ALTER TABLE ledger_accounts DROP CONSTRAINT ledger_accounts_kind;
+            ALTER TABLE ledger_accounts ADD CONSTRAINT ledger_accounts_kind
+              CHECK (kind IN ({OLD_KINDS}));
+          END IF;
+        END $$
+        """
+    )
