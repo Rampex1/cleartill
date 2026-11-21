@@ -154,7 +154,8 @@ export default function WebhookEndpoint() {
                 <tr>
                   <th>Event</th>
                   <th>Status</th>
-                  <th className="num">Attempts</th>
+                  {/* `attempts` counts failed sends (each schedules a retry); 0 = first try. */}
+                  <th className="num">Retries</th>
                   <th>Next attempt</th>
                   <th>
                     <span className="visually-hidden">Actions</span>
