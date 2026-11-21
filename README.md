@@ -82,6 +82,20 @@ refund, a decline, hosted checkout with and without 3D Secure, and signed webhoo
 to your machine. Then open <http://localhost:8000> to try the checkout yourself, or
 <http://localhost:8000/dashboard/signup> to explore the dashboard.
 
+## Deploy (free: Render + Neon)
+
+[`render.yaml`](render.yaml) deploys the whole app as one free Render web service:
+
+1. Create a free [Neon](https://neon.com) Postgres project and copy its **direct** connection
+   string (pooling off, so the host has no `-pooler`).
+2. In [Render](https://render.com), choose **New → Blueprint**, pick this repository, and paste
+   the Neon string as `DATABASE_URL`. Render generates `SECRET_KEY` itself.
+
+Migrations run on every start, the worker runs as a thread inside the web process (Render has
+no free background workers), and the public URL comes from Render's `RENDER_EXTERNAL_URL`.
+On the free plan the service sleeps after 15 idle minutes, so the first request after that takes
+up to a minute.
+
 ## Architecture
 
 ```mermaid
