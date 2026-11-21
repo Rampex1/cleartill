@@ -158,7 +158,7 @@ def one_of_each(client, db, at):
 
 def test_run_housekeeping_runs_every_job(db, one_of_each):
     result = housekeeping.run_housekeeping(_Begin(db))
-    assert result == dict.fromkeys(KEYS, 1)
+    assert result == {**dict.fromkeys(KEYS, 1), "expired_checkout_sessions": 0}
 
 
 def test_run_housekeeping_isolates_a_failing_job(db, one_of_each, monkeypatch, caplog):
@@ -172,5 +172,6 @@ def test_run_housekeeping_isolates_a_failing_job(db, one_of_each, monkeypatch, c
         "expired_authorizations": 1,
         "purged_idempotency_keys": 1,
         "purged_sessions": 1,
+        "expired_checkout_sessions": 0,
     }
     assert any(r.levelno >= logging.ERROR for r in caplog.records)

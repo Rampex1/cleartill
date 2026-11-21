@@ -5,7 +5,7 @@ import signal
 import threading
 import time
 
-from app import checkout, config, delivery, housekeeping
+from app import config, delivery, housekeeping
 from app.db import SessionLocal, engine
 from app.ledger_check import ledger_check
 
@@ -50,13 +50,6 @@ def tick(now: float, session_factory=SessionLocal) -> bool:
             log.info("housekeeping %s", housekeeping.run_housekeeping(session_factory))
         except Exception:
             log.exception("housekeeping failed")
-        try:  # beside run_housekeeping, not in its dict (agreed M15 tests pin that dict)
-            with session_factory.begin() as db:
-                expired = checkout.expire_sessions(db)
-            if expired:
-                log.info("expired %d checkout sessions", expired)
-        except Exception:
-            log.exception("checkout expiry failed")
     try:
         run_once()
     except Exception:

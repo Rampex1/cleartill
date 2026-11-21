@@ -34,6 +34,7 @@ def balance_transaction_json(bt: BalanceTransaction) -> dict:
         "available_on": int(bt.available_on.timestamp()),
         "source": bt.source_id,
         "created": int(bt.created.timestamp()),
+        "livemode": False,
     }
 
 

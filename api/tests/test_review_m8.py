@@ -17,6 +17,8 @@ from app.db import get_db
 from app.main import app
 from app.models import IdempotencyKey, PaymentMethod
 
+YEAR = datetime.now(UTC).year  # expiry years are relative: no time bomb
+
 FORM = {"Content-Type": "application/x-www-form-urlencoded"}
 API_DIR = Path(__file__).resolve().parent.parent
 
@@ -32,7 +34,7 @@ def fixed_clock(monkeypatch):
     monkeypatch.setattr(clock, "now", lambda: datetime(2026, 6, 15, tzinfo=UTC))
 
 
-def card_body(number="4242424242424242", month="12", year="2030", cvc="123"):
+def card_body(number="4242424242424242", month="12", year=str(YEAR + 5), cvc="123"):
     return (
         f"type=card&card[number]={number}&card[exp_month]={month}"
         f"&card[exp_year]={year}&card[cvc]={cvc}"
@@ -57,7 +59,12 @@ def test_idempotency_hash_is_keyed_and_excludes_the_cvc(client, db, keys, fixed_
     assert row.key == "pk:card-1"
     plain = {
         "type": "card",
-        "card": {"number": "4242424242424242", "exp_month": "12", "exp_year": "2030", "cvc": "123"},
+        "card": {
+            "number": "4242424242424242",
+            "exp_month": "12",
+            "exp_year": str(YEAR + 5),
+            "cvc": "123",
+        },
     }
     canonical = json.dumps(plain, sort_keys=True, separators=(",", ":"))
     unkeyed = hashlib.sha256(f"POST /v1/payment_methods {canonical}".encode()).hexdigest()

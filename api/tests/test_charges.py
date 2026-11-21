@@ -110,11 +110,21 @@ def test_publishable_key_is_403(client, skh, pkh, path, ledger_clean):
 def test_ledger_check_flags_clearing_vs_captured_mismatch(client, db, skh):
     ch = paid_pi(client, skh)["latest_charge"]
     assert ledger_check(db, own_txn=False) == []
-    db.execute(
-        text("UPDATE charges SET amount_captured = amount_captured + 1 WHERE id = :c"), {"c": ch}
-    )
-    assert ledger_check(db, own_txn=False) != []
+    # Tamper downwards: the charges_captured_le_amount CHECK forbids going above amount.
     db.execute(
         text("UPDATE charges SET amount_captured = amount_captured - 1 WHERE id = :c"), {"c": ch}
     )
+    assert ledger_check(db, own_txn=False) != []
+    db.execute(
+        text("UPDATE charges SET amount_captured = amount_captured + 1 WHERE id = :c"), {"c": ch}
+    )
     assert ledger_check(db, own_txn=False) == []
+
+
+def test_database_rejects_capturing_more_than_the_amount(client, db, skh):
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+
+    ch = paid_pi(client, skh)["latest_charge"]
+    with pytest.raises(IntegrityError), db.begin_nested():
+        db.execute(text("UPDATE charges SET amount_captured = amount + 1 WHERE id = :c"), {"c": ch})

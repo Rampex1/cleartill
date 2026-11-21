@@ -14,6 +14,7 @@ BT_KEYS = {
     "available_on",
     "source",
     "created",
+    "livemode",
 }
 
 

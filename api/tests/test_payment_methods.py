@@ -6,6 +6,8 @@ import pytest
 
 from app import clock, seed
 
+YEAR = datetime.now(UTC).year  # expiry years are relative: no time bomb
+
 FORM = {"Content-Type": "application/x-www-form-urlencoded"}
 PM_ID = re.compile(r"^pm_[0-9A-Za-z]+$")
 KEYS = {"id", "object", "type", "card", "created", "livemode"}
@@ -46,7 +48,7 @@ def err(r):
     return r.json()["error"]
 
 
-def body(number="4242424242424242", exp_month="12", exp_year="2030", cvc="123", **extra):
+def body(number="4242424242424242", exp_month="12", exp_year=str(YEAR + 5), cvc="123", **extra):
     params = {"type": "card"}
     if number is not None:
         params["card[number]"] = number
@@ -70,7 +72,7 @@ def create(client, h, **kw):
 
 @pytest.mark.parametrize("number", TEST_CARDS)
 def test_tokenize_test_card(client, pkh, number):
-    pm = create(client, pkh, number=number, exp_month="7", exp_year="2031")
+    pm = create(client, pkh, number=number, exp_month="7", exp_year=str(YEAR + 6))
     assert set(pm) == KEYS
     assert set(pm["card"]) == CARD_KEYS
     assert PM_ID.match(pm["id"])
@@ -81,7 +83,7 @@ def test_tokenize_test_card(client, pkh, number):
     assert pm["card"]["brand"] == "visa"
     assert pm["card"]["last4"] == number[-4:]
     assert pm["card"]["exp_month"] == 7
-    assert pm["card"]["exp_year"] == 2031
+    assert pm["card"]["exp_year"] == YEAR + 6
 
 
 def test_mastercard_brand(client, pkh):
@@ -98,7 +100,7 @@ def test_amex_brand_with_four_digit_cvc(client, pkh):
 
 def test_same_number_same_fingerprint(client, pkh):
     a = create(client, pkh)
-    b = create(client, pkh, exp_month="1", exp_year="2032", cvc="999")
+    b = create(client, pkh, exp_month="1", exp_year=str(YEAR + 7), cvc="999")
     assert a["id"] != b["id"]
     assert a["card"]["fingerprint"] == b["card"]["fingerprint"]
 

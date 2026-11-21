@@ -23,9 +23,8 @@ export default function Checkout() {
       if (status === 404) return setLoadError("missing");
       if (status !== 200) return setLoadError("retry");
       setLoadError(null);
-      // ponytail: a completed session's URL forwards to its success_url (design §5.10), so a
-      // merchant can use it as a redirector to its own https site. See M18 rulings.
-      if (body.status === "complete") return window.location.replace(body.success_url);
+      // A paid session shows a confirmation instead of forwarding: an automatic redirect would
+      // turn every paid link into a redirector to whatever https URL its merchant chose.
       setSession(body);
       if (!keepError) setError(body.last_payment_error?.message ?? null);
     },
@@ -84,6 +83,21 @@ export default function Checkout() {
     );
   }
   if (!session) return <main className="page"><p>Loading…</p></main>;
+  if (session.status === "complete") {
+    let host = "";
+    try {
+      host = new URL(session.success_url).host;
+    } catch {
+      host = "";
+    }
+    return (
+      <main className="page">
+        <h1>Payment complete</h1>
+        <p>This payment has already been made. Nothing more to do here.</p>
+        <a href={session.success_url}>Continue to {host || "the store"}</a>
+      </main>
+    );
+  }
   if (session.status === "expired") {
     return (
       <main className="page">
