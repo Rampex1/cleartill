@@ -2461,3 +2461,34 @@ code,
     text-align: left;
   }
 }
+
+
+.row-clickable {
+  cursor: pointer;
+}
+
+.row-clickable:hover .id-link {
+  color: var(--brand);
+  text-decoration: underline;
+}
+
+.row-clickable .row-chevron svg {
+  transition: transform 150ms var(--ease-out), color 150ms var(--ease-out);
+}
+
+.row-clickable:hover .row-chevron svg {
+  color: var(--brand);
+  transform: translateX(2px);
+}
+
+.id-link {
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  .table-stack .row-chevron {
+    display: none;
+  }
+}
