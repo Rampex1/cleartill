@@ -57,13 +57,8 @@ def tick(now: float, session_factory=SessionLocal) -> bool:
     return ran
 
 
-def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    config.secret_key()
-    config.public_base_url()
-    config.warn_if_insecure_urls(log)
-    # SIGTERM (deploys): finish the current delivery, then stop.
-    signal.signal(signal.SIGTERM, lambda *_: _stop.set())
+def run_loop() -> None:
+    """The worker's life: reconcile once, then tick until stopped."""
     log.info("worker started")
     check_ledger_on_start(engine)
     while not _stop.is_set():
@@ -73,6 +68,29 @@ def main() -> None:
             log.exception("worker loop error")
         _stop.wait(IDLE_SLEEP_SECONDS)
     log.info("worker stopped")
+
+
+def start_in_process() -> threading.Thread:
+    """Run the worker as a daemon thread of the web process (RUN_WORKER_IN_PROCESS=1)."""
+    _stop.clear()
+    thread = threading.Thread(target=run_loop, name="cleartill-worker", daemon=True)
+    thread.start()
+    return thread
+
+
+def stop() -> None:
+    """Ask the loop to finish its current delivery and exit."""
+    _stop.set()
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    config.secret_key()
+    config.public_base_url()
+    config.warn_if_insecure_urls(log)
+    # SIGTERM (deploys): finish the current delivery, then stop.
+    signal.signal(signal.SIGTERM, lambda *_: stop())
+    run_loop()
 
 
 if __name__ == "__main__":

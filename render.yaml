@@ -1,0 +1,28 @@
+# Render Blueprint (free plan): New → Blueprint → this repo. Render asks for DATABASE_URL
+# (a Neon Postgres connection string, direct/non-pooled) and generates SECRET_KEY.
+# PUBLIC_BASE_URL is not needed: the app falls back to Render's RENDER_EXTERNAL_URL.
+services:
+  - type: web
+    name: cleartill
+    runtime: docker
+    plan: free
+    region: ohio
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: .
+    # Migrations run before the server starts; the worker runs in-process (no free workers).
+    dockerCommand: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log"
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: RUN_WORKER_IN_PROCESS
+        value: "1"
+      # Render's proxy appends the client to X-Forwarded-For (rate limits key on it).
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+      # Demo: captured funds become available after 5 minutes instead of 2 days.
+      - key: AVAILABILITY_DELAY_SECONDS
+        value: "300"

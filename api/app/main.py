@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI
@@ -7,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app import config, errors, frontend
+from app import config, errors, frontend, worker
 from app.db import get_db
 from app.routers import (
     balance,
@@ -29,7 +31,17 @@ config.secret_key()  # refuse to start without a strong SECRET_KEY
 config.public_base_url()  # and without a usable PUBLIC_BASE_URL
 config.warn_if_insecure_urls(logging.getLogger("cleartill"))
 
-app = FastAPI(title="Cleartill")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    thread = worker.start_in_process() if config.run_worker_in_process() else None
+    yield
+    if thread is not None:
+        worker.stop()
+        await asyncio.to_thread(thread.join, 20)
+
+
+app = FastAPI(title="Cleartill", lifespan=lifespan)
 errors.install(app)
 app.include_router(customers.router)
 app.include_router(dashboard.router)

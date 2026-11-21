@@ -37,7 +37,11 @@ LOCAL_HOSTS = {"localhost", "127.0.0.1", "testserver"}
 def public_base_url() -> str:
     """Absolute base for URLs we hand out (next_action, checkout url). They can carry a
     client_secret, so plain http is only allowed for local hosts."""
-    value = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+    # Render sets RENDER_EXTERNAL_URL to the service's own https URL, so a Render deploy needs
+    # no configuration here; an explicit PUBLIC_BASE_URL (e.g. a custom domain) wins.
+    value = (
+        os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or ""
+    ).rstrip("/")
     parts = urlsplit(value)
     insecure_ok = parts.hostname in LOCAL_HOSTS or os.environ.get("ALLOW_INSECURE_URLS") == "1"
     if not parts.hostname or parts.scheme not in ({"https", "http"} if insecure_ok else {"https"}):
@@ -48,3 +52,10 @@ def public_base_url() -> str:
 def warn_if_insecure_urls(log) -> None:
     if os.environ.get("ALLOW_INSECURE_URLS") == "1":
         log.warning("ALLOW_INSECURE_URLS=1: the webhook SSRF guard is OFF (local development only)")
+
+
+def run_worker_in_process() -> bool:
+    """Hosts without a free background-worker tier (Render free) run the worker as a thread
+    of the web process. Safe with several processes too: deliveries use fenced claims and
+    housekeeping jobs lock what they touch."""
+    return os.environ.get("RUN_WORKER_IN_PROCESS") == "1"
